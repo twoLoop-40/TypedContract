@@ -24,9 +24,22 @@ record LaTeXDocument where
 ------------------------------------------------------------
 
 -- LaTeX 특수문자 이스케이프
+escapeChar : Char -> String
+escapeChar '&' = "\\&"
+escapeChar '%' = "\\%"
+escapeChar '$' = "\\$"
+escapeChar '#' = "\\#"
+escapeChar '_' = "\\_"
+escapeChar '{' = "\\{"
+escapeChar '}' = "\\}"
+escapeChar '~' = "\\textasciitilde{}"
+escapeChar '^' = "\\textasciicircum{}"
+escapeChar '\\' = "\\textbackslash{}"
+escapeChar c = singleton c
+
 public export
 escapeLatex : String -> String
-escapeLatex s = s  -- TODO: 실제 구현에서는 &, %, $, #, _, {, }, ~, ^ 등 처리
+escapeLatex s = concat (map escapeChar (unpack s))
 
 -- 들여쓰기
 public export
@@ -40,32 +53,32 @@ indent n s = pack (replicate n ' ') ++ s
 
 public export
 renderElement : DocElement -> String
-renderElement (Text s) = s ++ "\n\n"
+renderElement (Text s) = escapeLatex s ++ "\n\n"
 renderElement (StyledText s style) =
   (if style.bold then "\\textbf{" else "") ++
   (if style.italic then "\\textit{" else "") ++
-  s ++
+  escapeLatex s ++
   (if style.italic then "}" else "") ++
   (if style.bold then "}" else "") ++
   "\n\n"
-renderElement (Para s) = s ++ "\n\n"
+renderElement (Para s) = escapeLatex s ++ "\n\n"
 renderElement (Heading 1 title) =
   "\\begin{center}\n" ++
-  "{\\LARGE \\textbf{" ++ title ++ "}}\n" ++
+  "{\\LARGE \\textbf{" ++ escapeLatex title ++ "}}\n" ++
   "\\end{center}\n\n"
 renderElement (Heading 2 title) =
-  "\\section*{" ++ title ++ "}\n\n"
+  "\\section*{" ++ escapeLatex title ++ "}\n\n"
 renderElement (Heading 3 title) =
-  "\\subsection*{" ++ title ++ "}\n\n"
+  "\\subsection*{" ++ escapeLatex title ++ "}\n\n"
 renderElement (Heading _ title) =
-  "\\textbf{" ++ title ++ "}\n\n"
+  "\\textbf{" ++ escapeLatex title ++ "}\n\n"
 renderElement (BulletList items) =
   "\\begin{itemize}\n" ++
-  concat (map (\x => "  \\item " ++ x ++ "\n") items) ++
+  concat (map (\x => "  \\item " ++ escapeLatex x ++ "\n") items) ++
   "\\end{itemize}\n\n"
 renderElement (OrderedList items) =
   "\\begin{enumerate}\n" ++
-  concat (map (\x => "  \\item " ++ x ++ "\n") items) ++
+  concat (map (\x => "  \\item " ++ escapeLatex x ++ "\n") items) ++
   "\\end{enumerate}\n\n"
 renderElement (SimpleTable rows) =
   let cols = case rows of
@@ -74,7 +87,7 @@ renderElement (SimpleTable rows) =
       colSpec = pack (replicate cols 'l')
   in "\\begin{tabular}{" ++ colSpec ++ "}\n" ++
      "\\hline\n" ++
-     concat (map (\row => concat (intersperse " & " row) ++ " \\\\\n") rows) ++
+     concat (map (\row => concat (intersperse " & " (map escapeLatex row)) ++ " \\\\\n") rows) ++
      "\\hline\n" ++
      "\\end{tabular}\n\n"
 renderElement HRule =
@@ -84,7 +97,7 @@ renderElement (VSpace n) =
 renderElement PageBreak =
   "\\newpage\n\n"
 renderElement (Section title content) =
-  "\\subsection*{" ++ title ++ "}\n\n" ++
+  "\\subsection*{" ++ escapeLatex title ++ "}\n\n" ++
   concat (map renderElement content)
 renderElement (Box content) =
   "\\begin{center}\n" ++
