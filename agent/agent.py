@@ -1,0 +1,352 @@
+"""
+LangGraph 기반 Idris2 도메인 모델 생성 에이전트
+"""
+
+import subprocess
+from typing import TypedDict, List, Optional, Literal
+from pathlib import Path
+
+from langgraph.graph import StateGraph, END
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+
+from prompts import (
+    ANALYZE_DOCUMENT_PROMPT,
+    GENERATE_IDRIS_PROMPT,
+    FIX_ERROR_PROMPT,
+    FINAL_REVIEW_PROMPT
+)
+
+
+# ============================================================================
+# State Schema
+# ============================================================================
+
+class AgentState(TypedDict):
+    """에이전트 상태"""
+    # 입력
+    project_name: str
+    document_type: str  # "contract", "approval", "invoice"
+    reference_docs: List[str]  # 참고 문서 경로
+
+    # 중간 상태
+    analysis: Optional[str]  # 문서 분석 결과
+    idris_code: Optional[str]  # 생성된 Idris2 코드
+    current_file: str  # Domains/[project].idr
+
+    # 컴파일 상태
+    compile_attempts: int
+    last_error: Optional[str]
+    compile_success: bool
+
+    # 출력
+    final_module_path: Optional[str]
+    messages: List[str]
+
+
+# ============================================================================
+# Tools
+# ============================================================================
+
+def typecheck_idris(file_path: str) -> tuple[bool, str]:
+    """
+    Idris2 타입 체크 실행
+
+    Returns:
+        (success: bool, output: str)
+    """
+    try:
+        result = subprocess.run(
+            ["idris2", "--check", file_path],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=Path(__file__).parent.parent  # ScaleDeepSpec/ 디렉토리
+        )
+
+        success = result.returncode == 0
+        output = result.stdout + result.stderr
+
+        return success, output
+
+    except subprocess.TimeoutExpired:
+        return False, "Timeout: 타입 체크가 30초를 초과했습니다."
+    except FileNotFoundError:
+        return False, "Error: idris2 명령을 찾을 수 없습니다."
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+
+def save_idris_file(code: str, file_path: str) -> str:
+    """Idris2 코드를 파일로 저장"""
+    try:
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(code)
+
+        return f"✅ File saved: {file_path}"
+    except Exception as e:
+        return f"❌ Error saving file: {e}"
+
+
+def read_reference_doc(file_path: str) -> str:
+    """참고 문서 읽기"""
+    # TODO: PDF/이미지 처리
+    # 현재는 텍스트 파일만
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+
+# ============================================================================
+# Agent Nodes
+# ============================================================================
+
+def analyze_document(state: AgentState) -> AgentState:
+    """Node 1: 문서 분석"""
+    print("\n📄 [1/5] Analyzing document...")
+
+    # LLM 호출
+    llm = ChatOpenAI(model="gpt-4", temperature=0)
+
+    # 참고 문서 읽기
+    docs_content = "\n\n".join([
+        f"[{doc}]\n{read_reference_doc(doc)}"
+        for doc in state["reference_docs"]
+    ])
+
+    prompt = ANALYZE_DOCUMENT_PROMPT.format(
+        document_type=state["document_type"],
+        reference_docs=docs_content
+    )
+
+    response = llm.invoke([
+        SystemMessage(content=prompt),
+        HumanMessage(content=docs_content)
+    ])
+
+    analysis = response.content
+
+    # 분석 결과 저장
+    analysis_file = f"direction/analysis_{state['project_name']}.md"
+    save_idris_file(analysis, analysis_file)
+
+    state["analysis"] = analysis
+    state["messages"].append(f"✅ 문서 분석 완료: {analysis_file}")
+
+    return state
+
+
+def generate_idris_code(state: AgentState) -> AgentState:
+    """Node 2: Idris2 코드 생성"""
+    print("\n⚙️  [2/5] Generating Idris2 code...")
+
+    llm = ChatOpenAI(model="gpt-4", temperature=0)
+
+    prompt = GENERATE_IDRIS_PROMPT.format(
+        project_name=state["project_name"],
+        analysis=state["analysis"]
+    )
+
+    response = llm.invoke([SystemMessage(content=prompt)])
+
+    idris_code = response.content.strip()
+
+    # 코드 블록 제거 (```idris ... ```)
+    if idris_code.startswith("```"):
+        lines = idris_code.split("\n")
+        idris_code = "\n".join(lines[1:-1])
+
+    state["idris_code"] = idris_code
+    state["current_file"] = f"Domains/{state['project_name']}.idr"
+    state["messages"].append(f"✅ Idris2 코드 생성 완료")
+
+    return state
+
+
+def typecheck_code(state: AgentState) -> AgentState:
+    """Node 3: 타입 체크"""
+    print(f"\n🔍 [3/5] Type checking (attempt {state['compile_attempts'] + 1})...")
+
+    # 파일 저장
+    save_msg = save_idris_file(state["idris_code"], state["current_file"])
+    state["messages"].append(save_msg)
+
+    # 타입 체크
+    success, output = typecheck_idris(state["current_file"])
+
+    state["compile_attempts"] += 1
+    state["compile_success"] = success
+    state["last_error"] = None if success else output
+
+    if success:
+        state["messages"].append(f"✅ 타입 체크 성공!")
+        state["final_module_path"] = state["current_file"]
+    else:
+        state["messages"].append(f"❌ 타입 체크 실패:\n{output}")
+
+    return state
+
+
+def fix_compilation_error(state: AgentState) -> AgentState:
+    """Node 4: 에러 수정"""
+    print(f"\n🔧 [4/5] Fixing compilation error...")
+
+    llm = ChatOpenAI(model="gpt-4", temperature=0)
+
+    prompt = FIX_ERROR_PROMPT.format(
+        idris_code=state["idris_code"],
+        error_message=state["last_error"]
+    )
+
+    response = llm.invoke([SystemMessage(content=prompt)])
+
+    fixed_code = response.content.strip()
+
+    # 코드 블록 제거
+    if fixed_code.startswith("```"):
+        lines = fixed_code.split("\n")
+        fixed_code = "\n".join(lines[1:-1])
+
+    state["idris_code"] = fixed_code
+    state["messages"].append(f"🔧 코드 수정 완료 (attempt {state['compile_attempts']})")
+
+    return state
+
+
+# ============================================================================
+# Conditional Logic
+# ============================================================================
+
+def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error"]:
+    """타입 체크 후 다음 행동 결정"""
+    if state["compile_success"]:
+        return "finish"
+
+    if state["compile_attempts"] >= 5:
+        return "fail"
+
+    return "fix_error"
+
+
+# ============================================================================
+# Graph Construction
+# ============================================================================
+
+def create_agent() -> StateGraph:
+    """LangGraph 에이전트 생성"""
+
+    workflow = StateGraph(AgentState)
+
+    # 노드 추가
+    workflow.add_node("analyze", analyze_document)
+    workflow.add_node("generate", generate_idris_code)
+    workflow.add_node("typecheck", typecheck_code)
+    workflow.add_node("fix_error", fix_compilation_error)
+
+    # 엣지 정의
+    workflow.add_edge("analyze", "generate")
+    workflow.add_edge("generate", "typecheck")
+
+    # 조건부 엣지
+    workflow.add_conditional_edges(
+        "typecheck",
+        should_continue,
+        {
+            "finish": END,
+            "fail": END,
+            "fix_error": "fix_error"
+        }
+    )
+
+    workflow.add_edge("fix_error", "typecheck")
+
+    # 시작점
+    workflow.set_entry_point("analyze")
+
+    return workflow.compile()
+
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+def generate_domain_model(
+    project_name: str,
+    document_type: str,
+    reference_docs: List[str]
+) -> dict:
+    """
+    문서 → Idris2 도메인 모델 생성
+
+    Args:
+        project_name: 프로젝트명 (예: "MyContract")
+        document_type: 문서 유형 (예: "contract")
+        reference_docs: 참고 문서 경로 리스트
+
+    Returns:
+        최종 상태 dict
+    """
+    print("=" * 60)
+    print("🚀 Idris2 Domain Model Generator")
+    print("=" * 60)
+
+    # 초기 상태
+    initial_state: AgentState = {
+        "project_name": project_name,
+        "document_type": document_type,
+        "reference_docs": reference_docs,
+        "analysis": None,
+        "idris_code": None,
+        "current_file": "",
+        "compile_attempts": 0,
+        "last_error": None,
+        "compile_success": False,
+        "final_module_path": None,
+        "messages": []
+    }
+
+    # 에이전트 실행
+    app = create_agent()
+    result = app.invoke(initial_state)
+
+    # 결과 출력
+    print("\n" + "=" * 60)
+    print("📊 RESULT")
+    print("=" * 60)
+
+    for msg in result["messages"]:
+        print(msg)
+
+    if result["compile_success"]:
+        print(f"\n✅ SUCCESS: {result['final_module_path']}")
+        print(f"   Attempts: {result['compile_attempts']}")
+    else:
+        print(f"\n❌ FAILED after {result['compile_attempts']} attempts")
+        if result["last_error"]:
+            print(f"\nLast error:\n{result['last_error']}")
+
+    return result
+
+
+# ============================================================================
+# CLI
+# ============================================================================
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) < 3:
+        print("Usage: python agent.py <project_name> <document_type> <reference_doc>")
+        print("Example: python agent.py MyContract contract direction/계약서.pdf")
+        sys.exit(1)
+
+    project = sys.argv[1]
+    doc_type = sys.argv[2]
+    ref_docs = sys.argv[3:]
+
+    generate_domain_model(project, doc_type, ref_docs)
