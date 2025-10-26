@@ -1,5 +1,7 @@
 module Spec.WorkflowTypes
 
+import Spec.ErrorHandling
+
 ------------------------------------------------------------
 -- 문서 생성 워크플로우 타입 명세
 -- 목적: 전체 워크플로우를 타입 시스템으로 검증
@@ -54,6 +56,7 @@ data Phase
   | AnalysisPhase        -- Phase 2: 문서 분석
   | SpecGenerationPhase  -- Phase 3: Idris2 명세 생성
   | CompilationPhase     -- Phase 4: 컴파일 및 수정
+  | ErrorHandlingPhase   -- Phase 4b: 에러 분류 및 처리 전략 결정
   | DocImplPhase         -- Phase 5: 문서 구현 생성
   | DraftPhase           -- Phase 6: 초안 생성
   | FeedbackPhase        -- Phase 7: 사용자 피드백
@@ -66,6 +69,7 @@ Eq Phase where
   AnalysisPhase == AnalysisPhase = True
   SpecGenerationPhase == SpecGenerationPhase = True
   CompilationPhase == CompilationPhase = True
+  ErrorHandlingPhase == ErrorHandlingPhase = True
   DocImplPhase == DocImplPhase = True
   DraftPhase == DraftPhase = True
   FeedbackPhase == FeedbackPhase = True
@@ -79,6 +83,7 @@ Show Phase where
   show AnalysisPhase = "Phase 2: Analysis"
   show SpecGenerationPhase = "Phase 3: Spec Generation"
   show CompilationPhase = "Phase 4: Compilation"
+  show ErrorHandlingPhase = "Phase 4b: Error Handling"
   show DocImplPhase = "Phase 5: Document Implementation"
   show DraftPhase = "Phase 6: Draft Generation"
   show FeedbackPhase = "Phase 7: User Feedback"
@@ -93,11 +98,14 @@ public export
 data CompileResult
   = CompileSuccess
   | CompileError ErrorMsg
+  | CompileErrorClassified ClassifiedError  -- 분류된 에러
 
 public export
 Show CompileResult where
   show CompileSuccess = "Compilation succeeded"
   show (CompileError msg) = "Compilation failed: " ++ msg
+  show (CompileErrorClassified err) =
+    "Compilation failed (" ++ errorLevelToString err.level ++ "): " ++ err.message
 
 ------------------------------------------------------------
 -- 4. 사용자 만족도
@@ -157,6 +165,11 @@ record WorkflowState where
   compileAttempts : Nat
   compileResult : Maybe CompileResult
 
+  -- Phase 4b: 에러 핸들링
+  classifiedError : Maybe ClassifiedError  -- 분류된 에러
+  errorStrategy : Maybe ErrorStrategy      -- 선택된 전략
+  retryPolicy : RetryPolicy                -- 재시도 정책
+
   -- Phase 5: 문서 구현
   documentableImpl : Maybe String
   pipelineImpl : Maybe String
@@ -192,6 +205,9 @@ initialState name prompt docs = MkWorkflowState
   , specFile = Nothing
   , compileAttempts = 0
   , compileResult = Nothing
+  , classifiedError = Nothing
+  , errorStrategy = Nothing
+  , retryPolicy = defaultRetryPolicy
   , documentableImpl = Nothing
   , pipelineImpl = Nothing
   , draftText = Nothing
@@ -235,6 +251,13 @@ compilationPhaseComplete state =
     Just CompileSuccess => True
     _ => False
 
+-- Phase 4b 완료 조건 (에러 핸들링)
+public export
+errorHandlingPhaseComplete : WorkflowState -> Bool
+errorHandlingPhaseComplete state =
+  -- 에러가 분류되고 전략이 결정되면 완료
+  isJust state.classifiedError && isJust state.errorStrategy
+
 -- Phase 5 완료 조건
 public export
 docImplPhaseComplete : WorkflowState -> Bool
@@ -264,6 +287,7 @@ canAdvance state InputPhase = inputPhaseComplete state
 canAdvance state AnalysisPhase = analysisPhaseComplete state
 canAdvance state SpecGenerationPhase = specGenerationPhaseComplete state
 canAdvance state CompilationPhase = compilationPhaseComplete state
+canAdvance state ErrorHandlingPhase = errorHandlingPhaseComplete state
 canAdvance state DocImplPhase = docImplPhaseComplete state
 canAdvance state DraftPhase = draftPhaseComplete state
 canAdvance state FeedbackPhase = True  -- 항상 가능
@@ -276,7 +300,8 @@ nextPhase : Phase -> Phase
 nextPhase InputPhase = AnalysisPhase
 nextPhase AnalysisPhase = SpecGenerationPhase
 nextPhase SpecGenerationPhase = CompilationPhase
-nextPhase CompilationPhase = DocImplPhase
+nextPhase CompilationPhase = ErrorHandlingPhase  -- 컴파일 후 에러 핸들링
+nextPhase ErrorHandlingPhase = DocImplPhase      -- 에러 해결 후 Doc 구현
 nextPhase DocImplPhase = DraftPhase
 nextPhase DraftPhase = FeedbackPhase
 nextPhase FeedbackPhase = RefinementPhase

@@ -24,6 +24,15 @@ from prompts import (
     GENERATE_PIPELINE_PROMPT
 )
 
+from error_classifier import (
+    classify_error,
+    decide_strategy,
+    ErrorLevel,
+    ErrorStrategy,
+    DEFAULT_RETRY_POLICY,
+    format_user_message
+)
+
 
 # ============================================================================
 # State Schema
@@ -45,6 +54,11 @@ class AgentState(TypedDict):
     compile_attempts: int
     last_error: Optional[str]
     compile_success: bool
+
+    # 에러 핸들링 (Phase 4b)
+    classified_error: Optional[dict]  # ClassifiedError (JSON)
+    error_strategy: Optional[str]  # ErrorStrategy
+    user_action: Optional[str]  # 사용자 선택한 액션
 
     # 출력
     final_module_path: Optional[str]
@@ -259,7 +273,7 @@ def generate_idris_code(state: AgentState) -> AgentState:
 
 
 def typecheck_code(state: AgentState) -> AgentState:
-    """Node 3: 타입 체크"""
+    """Node 3: 타입 체크 + 에러 분류"""
     print(f"\n🔍 [3/5] Type checking (attempt {state['compile_attempts'] + 1})...")
 
     # 파일 저장
@@ -276,8 +290,30 @@ def typecheck_code(state: AgentState) -> AgentState:
     if success:
         state["messages"].append(f"✅ 타입 체크 성공!")
         state["final_module_path"] = state["current_file"]
+        state["classified_error"] = None
+        state["error_strategy"] = None
     else:
         state["messages"].append(f"❌ 타입 체크 실패:\n{output}")
+
+        # 에러 분류 (Phase 4b)
+        classified = classify_error(output)
+        state["classified_error"] = {
+            "level": classified.level.value,
+            "message": classified.message,
+            "location": str(classified.location) if classified.location else None,
+            "suggestion": classified.suggestion,
+            "available_actions": [a.value for a in classified.available_actions],
+            "auto_fixable": classified.auto_fixable
+        }
+
+        # 전략 결정
+        strategy = decide_strategy(DEFAULT_RETRY_POLICY, classified, state["compile_attempts"])
+        state["error_strategy"] = strategy.value
+
+        # 사용자 친화적 메시지
+        user_msg = format_user_message(classified)
+        state["messages"].append(f"\n{user_msg}")
+        state["messages"].append(f"권장 전략: {strategy.value}")
 
     return state
 
@@ -455,19 +491,85 @@ def generate_draft_outputs(state: AgentState) -> AgentState:
     return state
 
 
+def handle_user_decision(state: AgentState) -> AgentState:
+    """Node: 사용자 결정 처리 (증명 실패 시)"""
+    print("\n❓ [4b] Waiting for user decision...")
+
+    # 사용자 액션 대기 (API에서 설정)
+    user_action = state.get("user_action")
+
+    if user_action == "fallback":
+        state["messages"].append("사용자 선택: 증명 제거 후 계속 진행")
+        # 증명 제거 로직은 향후 구현
+        state["compile_success"] = True
+    elif user_action == "reanalyze":
+        state["messages"].append("사용자 선택: 문서 재분석")
+        # Phase 2로 돌아가기 (향후 구현)
+    elif user_action == "manual":
+        state["messages"].append("사용자 선택: 수동 수정 대기")
+    else:
+        state["messages"].append("사용자 액션 대기 중...")
+
+    return state
+
+
+def reanalyze_document(state: AgentState) -> AgentState:
+    """Node: 도메인 에러 시 문서 재분석"""
+    print("\n🔄 [Reanalyze] Re-analyzing document...")
+
+    state["messages"].append("⚠️ 도메인 모델링 오류 감지. 문서를 재분석합니다.")
+
+    # 분석 초기화
+    state["analysis"] = None
+    state["idris_code"] = None
+    state["compile_attempts"] = 0
+
+    # Phase 2로 돌아가기
+    # 실제로는 analyze_document를 다시 호출해야 함
+    return state
+
+
 # ============================================================================
 # Conditional Logic
 # ============================================================================
 
-def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error"]:
-    """타입 체크 후 다음 행동 결정"""
+def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error", "ask_user", "reanalyze"]:
+    """타입 체크 후 다음 행동 결정 (에러 분류 기반)"""
     if state["compile_success"]:
         return "finish"
 
-    if state["compile_attempts"] >= 5:
+    # 에러 전략에 따라 분기
+    strategy = state.get("error_strategy")
+
+    if strategy == "auto_fix":
+        # 문법 에러 - 자동 수정 시도 (최대 3회)
+        if state["compile_attempts"] < 3:
+            return "fix_error"
+        else:
+            return "fail"
+
+    elif strategy == "ask_user":
+        # 증명 실패 또는 알 수 없는 에러 - 사용자에게 물어봄
+        return "ask_user"
+
+    elif strategy == "fallback":
+        # 증명 제거 후 계속 진행
+        # TODO: 증명 제거 로직 구현
+        return "finish"
+
+    elif strategy == "reanalyze":
+        # 도메인 에러 - 재분석 필요
+        return "reanalyze"
+
+    elif strategy == "terminate":
+        # 중단
         return "fail"
 
-    return "fix_error"
+    else:
+        # 기본값: 에러 전략이 없으면 기존 로직 사용
+        if state["compile_attempts"] >= 5:
+            return "fail"
+        return "fix_error"
 
 
 # ============================================================================
@@ -475,7 +577,7 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error"]
 # ============================================================================
 
 def create_agent() -> StateGraph:
-    """LangGraph 에이전트 생성"""
+    """LangGraph 에이전트 생성 (에러 핸들링 통합)"""
 
     workflow = StateGraph(AgentState)
 
@@ -484,6 +586,8 @@ def create_agent() -> StateGraph:
     workflow.add_node("generate", generate_idris_code)
     workflow.add_node("typecheck", typecheck_code)
     workflow.add_node("fix_error", fix_compilation_error)
+    workflow.add_node("ask_user", handle_user_decision)      # Phase 4b: 사용자 결정
+    workflow.add_node("reanalyze", reanalyze_document)       # Phase 4b: 재분석
     workflow.add_node("gen_documentable", generate_documentable_impl)  # Phase 5
     workflow.add_node("gen_pipeline", generate_pipeline_impl)           # Phase 5
     workflow.add_node("gen_draft", generate_draft_outputs)              # Phase 6
@@ -492,18 +596,22 @@ def create_agent() -> StateGraph:
     workflow.add_edge("analyze", "generate")
     workflow.add_edge("generate", "typecheck")
 
-    # 조건부 엣지 (컴파일 성공 시 Phase 5로)
+    # 조건부 엣지 (에러 분류 기반 분기)
     workflow.add_conditional_edges(
         "typecheck",
         should_continue,
         {
             "finish": "gen_documentable",  # 성공 시 Phase 5로
-            "fail": END,
-            "fix_error": "fix_error"
+            "fail": END,                    # 중단
+            "fix_error": "fix_error",       # 문법 에러 - 자동 수정
+            "ask_user": "ask_user",         # 증명 실패 - 사용자 결정 대기
+            "reanalyze": "reanalyze"        # 도메인 에러 - 재분석
         }
     )
 
     workflow.add_edge("fix_error", "typecheck")
+    workflow.add_edge("ask_user", END)  # 사용자 결정 후 종료 (API에서 재시작)
+    workflow.add_edge("reanalyze", "analyze")  # 재분석 → 처음부터
 
     # Phase 5-6: Documentable → Pipeline → Draft → END
     workflow.add_edge("gen_documentable", "gen_pipeline")
@@ -551,6 +659,9 @@ def generate_domain_model(
         "compile_attempts": 0,
         "last_error": None,
         "compile_success": False,
+        "classified_error": None,
+        "error_strategy": None,
+        "user_action": None,
         "final_module_path": None,
         "messages": []
     }

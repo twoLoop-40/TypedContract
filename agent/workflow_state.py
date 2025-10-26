@@ -15,11 +15,12 @@ import json
 # ============================================================================
 
 class Phase(Enum):
-    """워크플로우 단계 (9개 Phase)"""
+    """워크플로우 단계 (10개 Phase - ErrorHandling 추가)"""
     INPUT = "InputPhase"                    # Phase 1: 입력 수집
     ANALYSIS = "AnalysisPhase"              # Phase 2: 문서 분석
     SPEC_GENERATION = "SpecGenerationPhase" # Phase 3: Idris2 명세 생성
     COMPILATION = "CompilationPhase"        # Phase 4: 컴파일 및 수정
+    ERROR_HANDLING = "ErrorHandlingPhase"   # Phase 4b: 에러 분류 및 처리
     DOC_IMPL = "DocImplPhase"               # Phase 5: 문서 구현 생성
     DRAFT = "DraftPhase"                    # Phase 6: 초안 생성
     FEEDBACK = "FeedbackPhase"              # Phase 7: 사용자 피드백
@@ -33,6 +34,7 @@ class Phase(Enum):
             Phase.ANALYSIS: "Phase 2: Analysis",
             Phase.SPEC_GENERATION: "Phase 3: Spec Generation",
             Phase.COMPILATION: "Phase 4: Compilation",
+            Phase.ERROR_HANDLING: "Phase 4b: Error Handling",
             Phase.DOC_IMPL: "Phase 5: Document Implementation",
             Phase.DRAFT: "Phase 6: Draft Generation",
             Phase.FEEDBACK: "Phase 7: User Feedback",
@@ -101,6 +103,11 @@ class WorkflowState:
     compile_attempts: int = 0
     compile_result: Optional[CompileResult] = None
 
+    # Phase 4b: 에러 핸들링
+    classified_error: Optional[dict] = None  # ClassifiedError (JSON)
+    error_strategy: Optional[str] = None     # ErrorStrategy
+    user_action: Optional[str] = None        # 사용자 선택한 액션
+
     # Phase 5: 문서 구현
     documentable_impl: Optional[str] = None
     pipeline_impl: Optional[str] = None
@@ -141,6 +148,13 @@ class WorkflowState:
         return (
             self.compile_result is not None and
             self.compile_result.success
+        )
+
+    def error_handling_phase_complete(self) -> bool:
+        """Phase 4b 완료 조건"""
+        return (
+            self.classified_error is not None and
+            self.error_strategy is not None
         )
 
     def doc_impl_phase_complete(self) -> bool:

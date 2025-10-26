@@ -54,6 +54,9 @@ class GenerationStatus(BaseModel):
     progress: float
     completed: bool
     error: Optional[str] = None
+    classified_error: Optional[dict] = None  # ClassifiedError
+    error_strategy: Optional[str] = None
+    available_actions: Optional[List[str]] = None
 
 class FeedbackRequest(BaseModel):
     project_name: str
@@ -218,17 +221,29 @@ async def get_status(project_name: str) -> GenerationStatus:
             detail=f"Project '{project_name}' not found"
         )
 
-    # 에러 메시지 구성
+    # 에러 메시지 및 분류 정보 구성
     error_msg = None
+    classified_error = None
+    error_strategy = None
+    available_actions = None
+
     if state.compile_result and not state.compile_result.success:
         error_msg = state.compile_result.error_msg
+
+    if state.classified_error:
+        classified_error = state.classified_error
+        error_strategy = state.error_strategy
+        available_actions = state.classified_error.get("available_actions", [])
 
     return GenerationStatus(
         project_name=project_name,
         current_phase=str(state.current_phase),
         progress=state.progress(),
         completed=state.workflow_complete(),
-        error=error_msg
+        error=error_msg,
+        classified_error=classified_error,
+        error_strategy=error_strategy,
+        available_actions=available_actions
     )
 
 @app.post("/api/project/{project_name}/draft")
