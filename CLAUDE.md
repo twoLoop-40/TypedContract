@@ -4,247 +4,367 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **formal document generation system** written in Idris2. The project demonstrates how to use dependent types to:
-1. Define domain models (like contracts, transactions) with compile-time correctness guarantees
-2. Automatically generate PDF documents from those domain models
+This is a **formal document generation system** with three main components:
 
-The codebase is split into two parts:
-- **Domain specifications** (`Domains/`): Business-specific types (e.g., ServiceContract for Spirati)
-- **Document generation framework** (root directory): Reusable tools for converting any domain model to PDF
+1. **Idris2 Core Framework**: Dependent type specifications for domain models and document generation
+2. **FastAPI Backend**: Python agent system that orchestrates Idris2 compilation and document generation
+3. **Next.js Frontend**: User interface for project creation, workflow monitoring, and document preview
+
+The system uses dependent types to guarantee correctness at compile-time and provides multiple output formats (LaTeX/PDF, Markdown, CSV, Text).
 
 ## Directory Structure
 
 ```
 ScaleDeepSpec/
+├── Core/                       # Idris2 document generation framework
+│   ├── DocumentModel.idr      # Generic document structure (headings, paragraphs, tables)
+│   ├── DomainToDoc.idr        # Converts domain models → document models
+│   ├── LaTeXRenderer.idr      # Converts documents → LaTeX
+│   ├── MarkdownRenderer.idr   # Converts documents → Markdown
+│   ├── TextRenderer.idr       # Converts documents → plain text
+│   ├── CSVRenderer.idr        # Converts documents → CSV
+│   └── Generator.idr          # Orchestrates the pipeline
+│
 ├── Domains/                    # Domain-specific models (examples)
 │   ├── ScaleDeep.idr          # Outsourcing contract domain model
 │   └── ApprovalNarrative.idr  # Pre-approval narrative model
 │
-├── DocumentModel.idr          # Generic document structure (headings, paragraphs, tables)
-├── DomainToDoc.idr           # Converts domain models → document models
-├── LaTeXRenderer.idr         # Converts document models → LaTeX
-├── Generator.idr             # Orchestrates the full pipeline
-├── Main.idr                  # Executable (IO operations)
+├── Spec/                       # Formal workflow specifications
+│   ├── WorkflowTypes.idr      # Core workflow state machine types
+│   ├── WorkflowExecution.idr  # Execution semantics & transitions
+│   ├── AgentOperations.idr    # Agent system operations
+│   ├── RendererOperations.idr # Multi-format rendering operations
+│   ├── FrontendTypes.idr      # UI state and view types
+│   └── *Example.idr           # Example workflows & usage
 │
-├── direction/                # Reference materials
-│   └── 외주용역 사전승인 신청서.pdf
+├── agent/                      # Python FastAPI backend
+│   ├── main.py                # FastAPI application
+│   ├── agent.py               # LangGraph agent system
+│   ├── prompts.py             # Agent prompts
+│   └── requirements.txt       # Python dependencies
 │
-└── 용역계약서.txt            # Generated text output
+├── frontend/                   # Next.js 14 frontend (TODO)
+│   ├── package.json
+│   └── README.md
+│
+├── docker/                     # Docker configuration
+│   ├── Dockerfile.backend     # FastAPI + Idris2 + LaTeX
+│   └── Dockerfile.frontend    # Next.js 14
+│
+├── docs/                       # Documentation
+│   ├── DOCKER_SETUP.md        # Docker usage guide
+│   ├── FRONTEND_SPEC.md       # Frontend architecture
+│   ├── AGENT_SYSTEM.md        # Agent system design
+│   └── *.md                   # Additional docs
+│
+├── Main.idr                    # Idris2 executable (IO operations)
+├── docker-compose.yml          # Full stack orchestration
+└── output/                     # Generated documents
 ```
 
-## Building and Type-Checking
+## Common Development Commands
+
+### Docker (Recommended)
 
 ```bash
+# Start all services (Frontend + Backend)
+docker-compose up --build
+
+# Start in background
+docker-compose up -d
+
+# View logs
+docker-compose logs -f backend
+docker-compose logs -f frontend
+
+# Stop services
+docker-compose down
+
+# Access backend container for Idris2 development
+docker-compose exec backend bash
+
+# Access frontend container
+docker-compose exec frontend sh
+```
+
+Access points:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API Documentation: http://localhost:8000/docs
+
+### Idris2 Type-Checking
+
+```bash
+# Check core framework modules
+idris2 --check Core/DocumentModel.idr
+idris2 --check Core/DomainToDoc.idr
+idris2 --check Core/LaTeXRenderer.idr
+idris2 --check Core/MarkdownRenderer.idr
+idris2 --check Core/TextRenderer.idr
+idris2 --check Core/CSVRenderer.idr
+idris2 --check Core/Generator.idr
+
 # Check domain models
 idris2 --check Domains/ScaleDeep.idr
 idris2 --check Domains/ApprovalNarrative.idr
 
-# Check document framework
-idris2 --check DocumentModel.idr
-idris2 --check LaTeXRenderer.idr
-idris2 --check DomainToDoc.idr
-idris2 --check Generator.idr
+# Check workflow specifications
+idris2 --check Spec/WorkflowTypes.idr
+idris2 --check Spec/WorkflowExecution.idr
+idris2 --check Spec/AgentOperations.idr
+idris2 --check Spec/RendererOperations.idr
+idris2 --check Spec/FrontendTypes.idr
 
-# Check everything (through Generator)
-idris2 --check Generator.idr
+# Check everything through Main
+idris2 --check Main.idr
+```
+
+### Backend Development
+
+```bash
+# Inside backend container
+cd agent/
+pytest tests/                    # Run Python tests
+python -m agent.main            # Run FastAPI directly (optional)
+
+# Outside container (requires Python + dependencies)
+cd agent/
+pip install -r requirements.txt
+uvicorn agent.main:app --reload
+```
+
+### Frontend Development
+
+```bash
+# Inside frontend container
+cd /app
+npm install                     # Install dependencies
+npm run dev                     # Development server
+npm run build                   # Production build
+npm run lint                    # Lint code
 ```
 
 ## Architecture
 
-### 1. Domain Models (`Domains/`)
+The system has three layers that work together:
 
-These are **business-specific** Idris2 types. Each domain represents a real-world contract or document.
+### Layer 1: Idris2 Core Framework (`Core/`)
 
-**Example: `Domains/ScaleDeep.idr`**
-- Models a math question input/review service contract
-- Client: ㈜스피라티, Contractor: ㈜이츠에듀
-- Uses dependent types to prove `totalPrice = supplyPrice + vat`
-- Structured in 9 layers:
-  1. Basic data structures (Money, VAT rate)
-  2. Unit pricing with proofs (`UnitPrice`)
-  3. Deliverables (output specifications)
-  4. Task specifications
-  5. Contract records
-  6. Transaction records
-  7. Quotations (vendor comparison)
-  8. Service contract (full legal document)
-  9. Outsourcing package (combines everything)
+The document generation framework provides type-safe transformation from domain models to multiple output formats.
 
-**Key types:**
-- `ServiceContract`: Complete contract with parties, terms, payment schedule
-- `Party`: Company information (name, representative, business number)
-- `ContractTerms`: 14 legal articles (purpose, scope, payment, IP rights, etc.)
+**Key modules:**
+- `DocumentModel.idr`: Abstract document structure (headings, paragraphs, tables, lists, etc.)
+- `DomainToDoc.idr`: Converts domain models to generic documents via `Documentable` interface
+- `LaTeXRenderer.idr`: Renders documents as LaTeX (for PDF generation)
+- `MarkdownRenderer.idr`: Renders documents as Markdown
+- `TextRenderer.idr`: Renders documents as plain text
+- `CSVRenderer.idr`: Renders documents as CSV (for tabular data)
+- `Generator.idr`: Orchestrates the full pipeline
 
-### 2. Document Model (`DocumentModel.idr`)
-
-**Purpose**: Generic, reusable document structure independent of any specific domain.
-
-**Key types:**
-- `DocElement`: Text, Heading, BulletList, OrderedList, Table, HRule, VSpace, PageBreak, Section, Box
-- `Metadata`: Title, author, date, document number
-- `Document`: Metadata + body (list of DocElement)
-
-**Validation functions:**
-- `validDocument`: Ensures document has title and non-empty body
-
-### 3. Domain → Document Conversion (`DomainToDoc.idr`)
-
-**Purpose**: Bridge between domain models and generic documents.
-
-**Key interface:**
+**Core pattern - `Documentable` interface:**
 ```idris
 interface Documentable a where
   toDocument : a -> Document
+
+-- Any domain model can implement this to become renderable
 ```
 
-**Implementations:**
-- `Documentable ServiceContract`: Converts contract to formatted document
-- `Documentable TaskSpec`: Converts task specification to document
-- `Documentable Transaction`: Converts transaction to invoice-style document
-
-**Helper functions:**
-- `partyToElements`: Party → DocElement list (company info block)
-- `termsToArticles`: ContractTerms → 14 article sections
-- `deliverablesToElements`: Deliverables → formatted list
-
-### 4. LaTeX Rendering (`LaTeXRenderer.idr`)
-
-**Purpose**: Convert abstract Document to concrete LaTeX source code.
-
-**Key functions:**
-- `renderElement : DocElement -> String`: Renders one element
-- `renderDocument : Document -> LaTeXDocument`: Full document rendering
-- `extractSource : LaTeXDocument -> String`: Get LaTeX source code
-
-**LaTeX setup:**
-- Uses `kotex` package for Korean language support
-- A4 paper, 25mm margins
-- No paragraph indentation (business document style)
-
-### 5. Generation Pipeline (`Generator.idr`)
-
-**Purpose**: Type-safe orchestration of the full generation process.
-
-**Key type:**
+**Multi-format rendering:**
 ```idris
-record GenerationPipeline a where
-  domainModel : a
-  documentModel : Document
-  latexOutput : LaTeXDocument
-  outputPath : String
+-- From domain model → multiple outputs
+doc = toDocument myDomainModel
+latex = renderLaTeX doc
+markdown = renderMarkdown doc
+text = renderText doc
+csv = renderCSV doc
 ```
 
-**Main function:**
-```idris
-createPipeline : Documentable a => a -> String -> GenerationPipeline a
-```
+### Layer 2: Domain Models (`Domains/`)
 
-**Pre-configured pipelines:**
-- `spiratiContractPipeline`: ServiceContract → PDF
-- `spiratiTaskPipeline`: TaskSpec → PDF
-- `spiratiTransactionPipeline`: Transaction → PDF
+Business-specific types with compile-time correctness guarantees.
 
-**Batch processing:**
-- `BatchGeneration`: Group multiple documents for batch generation
+**Example: `Domains/ScaleDeep.idr`**
+- Models a service contract with dependent type proofs
+- Proves `totalPrice = supplyPrice + vat` at compile-time using `UnitPrice` with proof terms
+- Implements `Documentable ServiceContract` to enable automatic rendering
 
-### 6. Execution (`Main.idr`)
+**Example: `Domains/ApprovalNarrative.idr`**
+- Models a pre-approval narrative document
+- Demonstrates different domain model structure
 
-**Purpose**: IO operations (file writing, PDF compilation).
+### Layer 3: Workflow Specifications (`Spec/`)
 
-**Key functions:**
-- `writeLatexFile : GenerationPipeline a -> IO (Either String String)`
-- `compilePDF : String -> IO (Either String String)` (TODO: call pdflatex)
-- `executePipeline : GenerationPipeline a -> IO ()`
-- `executeBatch : BatchGeneration -> IO ()`
+Formal specifications for the agent system and UI behavior.
+
+**Core workflow modules:**
+- `WorkflowTypes.idr`: State machine for document generation (Init → Draft → Review → Final)
+- `WorkflowExecution.idr`: Execution semantics and state transitions
+- `AgentOperations.idr`: LangGraph agent operations (prompting, code generation, validation)
+- `RendererOperations.idr`: Multi-format rendering operations
+- `FrontendTypes.idr`: UI views, upload states, and user actions
+
+**Purpose**: These specifications guide the Python backend implementation and ensure type-safe workflow execution.
+
+### Layer 4: FastAPI Backend (`agent/`)
+
+Python backend that orchestrates the full system.
+
+**Key components:**
+- `main.py`: FastAPI REST API (project init, status, feedback, downloads)
+- `agent.py`: LangGraph agent system that generates Idris2 code based on user prompts
+- `prompts.py`: Agent prompts for code generation
+
+**API Endpoints:**
+- `POST /api/project/init`: Initialize new project
+- `GET /api/project/{name}/status`: Get generation status
+- `POST /api/project/{name}/feedback`: Submit user feedback
+- `GET /api/project/{name}/draft`: Get draft outputs (txt/md/csv)
+- `GET /api/project/{name}/download`: Download final PDF
+
+### Layer 5: Next.js Frontend (`frontend/`)
+
+User interface for the document generation system (TODO - not yet implemented).
+
+**Planned features:**
+- Project creation with prompt input and file upload
+- Real-time workflow progress monitoring
+- Draft preview (txt/md/csv)
+- Feedback submission for revisions
+- PDF download
 
 ## Key Patterns
 
-### Dependent Type Proofs
+### 1. Dependent Type Proofs
 
-The `UnitPrice` type carries a compile-time proof:
+Idris2 enables compile-time correctness guarantees through dependent types.
 
+**Example from `Domains/ScaleDeep.idr`:**
 ```idris
 data UnitPrice : Type where
   MkUnitPrice : (perItem : Nat)
     -> (quantity : Nat)
     -> (totalAmount : Nat)
-    -> (validTotal : totalAmount = perItem * quantity)
+    -> (validTotal : totalAmount = perItem * quantity)  -- Proof term
     -> UnitPrice
-```
 
-Smart constructor auto-generates proof:
-```idris
+-- Smart constructor auto-generates proof
 mkUnitPrice : (perItem : Nat) -> (quantity : Nat) -> UnitPrice
 mkUnitPrice p q = MkUnitPrice p q (p * q) Refl
 ```
 
-### Type Class for Extensibility
+This ensures arithmetic correctness is verified at compile-time, not runtime.
 
-The `Documentable` interface enables adding new domain types without modifying framework code:
+### 2. Type Class for Extensibility
 
+The `Documentable` interface in `Core/DomainToDoc.idr` enables adding new domain models without modifying framework code.
+
+**Adding a new domain model:**
 ```idris
--- Add a new domain type
+-- 1. Define your domain type
 record Invoice where
+  constructor MkInvoice
   number : String
   amount : Nat
 
--- Make it documentable
+-- 2. Make it documentable
 Documentable Invoice where
   toDocument inv = MkDoc
     (MkMetadata "Invoice" "" "" inv.number)
     [Heading 1 "Invoice", Para ("Amount: " ++ show inv.amount)]
 
--- Automatically works with the pipeline
-myInvoice = createPipeline (MkInvoice "INV-001" 10000) "invoice.pdf"
+-- 3. Automatically works with all renderers
+myInvoice = MkInvoice "INV-001" 10000
+latexDoc = renderLaTeX (toDocument myInvoice)
+markdownDoc = renderMarkdown (toDocument myInvoice)
+textDoc = renderText (toDocument myInvoice)
 ```
 
-### Validation at Multiple Levels
+### 3. Workflow State Machine
 
-1. **Compile-time**: Dependent types prove arithmetic correctness
-2. **Runtime**: Boolean validation functions (`validContract`, `validDocument`)
-3. **Pipeline-level**: `validatePipeline` checks full generation setup
+The `Spec/WorkflowTypes.idr` module defines a type-safe state machine for document generation:
+
+```idris
+data WorkflowPhase
+  = InitPhase
+  | DraftPhase
+  | ReviewPhase
+  | FinalPhase
+
+data WorkflowState : WorkflowPhase -> Type where
+  -- Each phase has specific data requirements
+  Init : ProjectName -> UserPrompt -> WorkflowState InitPhase
+  Draft : ProjectName -> DraftOutputs -> WorkflowState DraftPhase
+  -- ... etc
+```
+
+This ensures transitions follow valid paths and carry appropriate data.
+
+### 4. Multi-Format Rendering
+
+All renderers implement a consistent pattern in `Core/*Renderer.idr`:
+
+```idris
+-- Abstract document → Concrete format
+renderElement : DocElement -> String
+renderDocument : Document -> FormatDocument
+extractSource : FormatDocument -> String
+```
+
+This separation enables:
+- Single domain model → multiple output formats
+- Format-specific optimizations (e.g., LaTeX Korean support)
+- Easy addition of new formats
 
 ## Adding New Domain Models
 
 1. Create `Domains/MyDomain.idr`
-2. Define your domain types (records, data)
-3. Export types with `public export`
-4. Add `Documentable MyDomainType where toDocument = ...`
-5. Create pipeline: `myPipeline = createPipeline myModel "output.pdf"`
+2. Define domain types using `record` or `data`
+3. Mark types as `public export`
+4. Implement `Documentable MyDomainType`
+5. Optionally add dependent type proofs for correctness guarantees
 
-## Example: Spirati Contract
-
+**Minimal example:**
 ```idris
--- Domain model with proofs
-serviceContractSpiratiItsEdu : ServiceContract
+module Domains.MyDomain
 
--- Automatic conversion to document
-doc : Document
-doc = toDocument serviceContractSpiratiItsEdu
+import Core.DocumentModel
+import Core.DomainToDoc
 
--- Automatic LaTeX generation
-latex : LaTeXDocument
-latex = renderDocument doc
+public export
+record MyContract where
+  constructor MkMyContract
+  title : String
+  parties : List String
+  amount : Nat
 
--- Full pipeline
-pipeline : GenerationPipeline ServiceContract
-pipeline = createPipeline serviceContractSpiratiItsEdu "contract.pdf"
-
--- Execute (in Main.idr)
-main = executePipeline pipeline
+public export
+Documentable MyContract where
+  toDocument c = MkDoc
+    (MkMetadata c.title "" "" "")
+    [ Heading 1 c.title
+    , Heading 2 "Parties"
+    , BulletList c.parties
+    , Para ("Amount: ₩" ++ show c.amount)
+    ]
 ```
 
-## Domain Context: Spirati Example
+## System Integration Flow
 
-The `Domains/ScaleDeep.idr` file models a real contract:
-- **Client**: ㈜스피라티 (Spirati Inc.)
-- **Contractor**: ㈜이츠에듀 (ItsEdu Inc.)
+1. **User input** → Frontend (Next.js)
+2. **Project init** → Backend API (`POST /api/project/init`)
+3. **Agent generates Idris2 code** → LangGraph agent creates domain model
+4. **Type checking** → `idris2 --check` validates correctness
+5. **Document generation** → Idris2 compiles and generates outputs
+6. **Multi-format rendering** → txt/md/csv for preview, LaTeX for PDF
+7. **User feedback** → Optional revision cycle
+8. **Final output** → PDF download
+
+## Reference: Spirati Contract Example
+
+The `Domains/ScaleDeep.idr` file demonstrates a complete domain model:
+- **Client**: ㈜스피라티, **Contractor**: ㈜이츠에듀
 - **Service**: Math question input/review (50,650 questions @ ₩1,000 each)
-- **Amount**: ₩50,650,000 + ₩5,065,000 VAT = ₩55,715,000
-- **Timeline**: 2025-10-01 to 2025-11-30
-- **Deliverables**:
-  - 11/5: 10,000 questions, 5,000 HWP files
-  - 11/20: All 50,650 HWP files complete
-  - 11/30: All LaTeX + HWP complete
+- **Proof**: `totalPrice = supplyPrice + vat` verified at compile-time
+- **Timeline**: 2025-10-01 to 2025-11-30 with milestone-based deliverables
 
-This serves as a reference implementation for creating other contract models.
+This serves as a reference implementation for creating new contract models.
