@@ -3,7 +3,7 @@ FastAPI Backend for ScaleDeepSpec
 Handles document upload, Idris2 generation, and user feedback
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -11,6 +11,18 @@ from typing import List, Optional
 import subprocess
 import os
 from pathlib import Path
+
+# Workflow state management (Spec/WorkflowTypes.idr의 Python 구현)
+from workflow_state import (
+    WorkflowState,
+    Phase,
+    CompileResult,
+    UserSatisfaction,
+    create_initial_state
+)
+
+# LangGraph agent
+from agent import run_workflow
 
 app = FastAPI(
     title="ScaleDeepSpec API",
@@ -80,19 +92,32 @@ async def initialize_project(request: ProjectInitRequest):
     """
     Initialize a new document generation project
 
-    Phase 1: Input Collection
+    Phase 1: Input Collection (Spec/WorkflowTypes.idr의 InputPhase)
+    - Create WorkflowState
     - Store user prompt and reference documents
-    - Create project directory structure
+    - Save state to disk
     """
     project_dir = Path(f"./output/{request.project_name}")
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save user prompt
+    # WorkflowState 생성 (Spec/WorkflowTypes.idr의 initialState)
+    state = create_initial_state(
+        project_name=request.project_name,
+        user_prompt=request.user_prompt,
+        reference_docs=request.reference_docs
+    )
+
+    # 상태 저장
+    state.save(Path("./output"))
+
+    # Save user prompt (legacy)
     (project_dir / "prompt.txt").write_text(request.user_prompt)
 
     return {
         "project_name": request.project_name,
         "status": "initialized",
+        "current_phase": str(state.current_phase),
+        "progress": state.progress(),
         "message": "Project initialized successfully"
     }
 

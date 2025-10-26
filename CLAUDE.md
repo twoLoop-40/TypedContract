@@ -125,12 +125,32 @@ idris2 --check Main.idr
 # Inside backend container
 cd agent/
 pytest tests/                    # Run Python tests
+pytest tests/ -v                 # Verbose output
+pytest tests/test_workflow.py   # Run specific test file
 python -m agent.main            # Run FastAPI directly (optional)
 
 # Outside container (requires Python + dependencies)
 cd agent/
 pip install -r requirements.txt
 uvicorn agent.main:app --reload
+```
+
+**IMPORTANT: Testing Strategy**
+
+Python is a runtime language without compile-time type checking like Idris2. Therefore:
+
+1. **Write tests for every new feature** before or during implementation
+2. **Run tests after every change** to catch runtime errors early
+3. **Test workflow state transitions** to ensure they match Spec/WorkflowTypes.idr
+4. **Test API endpoints** with both success and failure cases
+
+Test structure:
+```
+agent/tests/
+├── test_workflow_state.py    # WorkflowState logic tests
+├── test_api_endpoints.py     # FastAPI endpoint tests
+├── test_agent.py              # LangGraph agent tests
+└── conftest.py                # Pytest fixtures
 ```
 
 ### Frontend Development
