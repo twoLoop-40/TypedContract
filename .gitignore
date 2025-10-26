@@ -1,0 +1,28 @@
+# Idris2 build artifacts
+build/
+*.ttc
+*.ttm
+*.ibc
+
+# Generated files
+output/
+*.tex
+*.pdf
+*.aux
+*.log
+*.out
+
+# Backup files
+*.bak
+*.bak2
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
