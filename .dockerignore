@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.pytest_cache
+.coverage
+
+# IDEs
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Build artifacts
+build/
+output/*.pdf
+output/*.tex
+output/*.aux
+output/*.log
+
+# Documentation (제외하되 direction/은 마운트로 사용)
+docs/
+README.md
+
+# Frontend
+frontend/node_modules
+frontend/.next
+frontend/out
+
+# Environment
+.env.example
+.DS_Store
+
+# direction 폴더 전체 제외 (docker-compose.yml에서 볼륨으로 마운트됨)
+direction/

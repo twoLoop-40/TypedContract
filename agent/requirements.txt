@@ -1,17 +1,17 @@
 # FastAPI and ASGI server
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
 
-# LangGraph and LangChain
-langgraph==0.0.26
-langchain==0.1.0
-langchain-anthropic==0.1.0
-langchain-openai==0.0.2
+# LangGraph and LangChain (최신 버전)
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-openai>=0.2.0
 
-# AI/ML libraries
-anthropic==0.8.0
-openai==1.6.0
+# AI/ML libraries (최신 버전)
+anthropic>=0.39.0
+openai>=1.54.0
 
 # PDF processing
 PyPDF2==3.0.1
@@ -22,9 +22,9 @@ pytesseract==0.3.10
 pandas==2.1.4
 openpyxl==3.1.2
 
-# Type checking and validation
-pydantic==2.5.2
-pydantic-settings==2.1.0
+# Type checking and validation (최신 버전)
+pydantic>=2.10.0
+pydantic-settings>=2.1.0
 
 # HTTP client
 httpx==0.25.2

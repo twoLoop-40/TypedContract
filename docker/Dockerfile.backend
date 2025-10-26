@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     texlive-fonts-recommended \
     texlive-lang-korean \
     fonts-nanum \
+    chezscheme \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Idris2
