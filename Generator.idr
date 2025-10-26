@@ -114,19 +114,19 @@ transactionPipeline = createPipeline
 public export
 spiratiContractPipeline : GenerationPipeline ServiceContract
 spiratiContractPipeline =
-  createPipeline serviceContractSpiratiItsEdu "output/용역계약서.pdf"
+  createPipeline serviceContractSpiratiItsEdu "output/용역계약서"
 
 -- 과업명세서 생성 파이프라인
 public export
 spiratiTaskPipeline : GenerationPipeline TaskSpec
 spiratiTaskPipeline =
-  createPipeline mathInputSpec "output/과업명세서.pdf"
+  createPipeline mathInputSpec "output/과업명세서"
 
 -- 거래명세서 생성 파이프라인
 public export
 spiratiTransactionPipeline : GenerationPipeline Transaction
 spiratiTransactionPipeline =
-  createPipeline transactionItsEdu "output/거래명세서.pdf"
+  createPipeline transactionItsEdu "output/거래명세서"
 
 
 ------------------------------------------------------------

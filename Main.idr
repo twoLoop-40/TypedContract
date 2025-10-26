@@ -74,7 +74,7 @@ compilePDF texPath = do
 executePipeline : GenerationPipeline a -> IO ()
 executePipeline pipeline = do
   putStrLn "=== PDF Generation Pipeline ==="
-  putStrLn $ "Output: " ++ pipeline.outputPath
+  putStrLn $ "Output: " ++ pipeline.outputPath ++ ".pdf"
 
   -- 1단계: LaTeX 파일 쓰기
   putStrLn "[1/2] Writing LaTeX file..."
