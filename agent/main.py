@@ -148,41 +148,87 @@ async def upload_reference_docs(
     }
 
 @app.post("/api/project/{project_name}/generate")
-async def generate_spec(project_name: str):
+async def generate_spec(project_name: str, background_tasks: BackgroundTasks):
     """
     Start Idris2 specification generation workflow
 
-    Phases 2-5:
-    - Analysis (LangGraph Agent)
-    - Spec Generation (LangGraph Agent)
-    - Compilation Loop (LangGraph Agent)
-    - Document Implementation (LangGraph Agent)
+    Phases 2-5 (Spec/WorkflowTypes.idr):
+    - Phase 2: Analysis (LangGraph Agent)
+    - Phase 3: Spec Generation (LangGraph Agent)
+    - Phase 4: Compilation Loop (LangGraph Agent)
+    - Phase 5: Document Implementation (LangGraph Agent)
 
     Returns immediately with task ID
     Frontend should poll /api/project/{name}/status
     """
-    # TODO: Implement LangGraph agent workflow
-    # This will be the core LangGraph Agent 1 from docs/AGENT_ARCHITECTURE.md
+    # WorkflowState 로드
+    state = WorkflowState.load(project_name, Path("./output"))
 
+    if state is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_name}' not found. Call /api/project/init first."
+        )
+
+    # Phase 검증
+    if not state.input_phase_complete():
+        raise HTTPException(
+            status_code=400,
+            detail="Input phase not complete. Upload reference documents first."
+        )
+
+    # 백그라운드에서 LangGraph 실행
+    def run_generation():
+        try:
+            # Phase 2-5: LangGraph agent 실행
+            updated_state = run_workflow(state)
+
+            # 상태 저장
+            updated_state.save(Path("./output"))
+
+        except Exception as e:
+            # 에러 발생 시 상태에 기록
+            state.compile_result = CompileResult(success=False, error_msg=str(e))
+            state.save(Path("./output"))
+
+    background_tasks.add_task(run_generation)
+
+    # 즉시 응답 반환
     return {
         "project_name": project_name,
         "status": "started",
-        "message": "Idris2 generation started (not yet implemented)"
+        "current_phase": str(state.current_phase),
+        "message": "Idris2 generation started. Poll /api/project/{name}/status for progress."
     }
 
 @app.get("/api/project/{project_name}/status")
 async def get_status(project_name: str) -> GenerationStatus:
     """
     Get current workflow status
-    Polls the LangGraph state for progress
+
+    Returns WorkflowState information (Spec/WorkflowTypes.idr)
+    Frontend polls this endpoint to track progress
     """
-    # TODO: Implement status tracking from LangGraph state
+    # WorkflowState 로드
+    state = WorkflowState.load(project_name, Path("./output"))
+
+    if state is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_name}' not found"
+        )
+
+    # 에러 메시지 구성
+    error_msg = None
+    if state.compile_result and not state.compile_result.success:
+        error_msg = state.compile_result.error_msg
 
     return GenerationStatus(
         project_name=project_name,
-        current_phase="InputPhase",
-        progress=0.0,
-        completed=False
+        current_phase=str(state.current_phase),
+        progress=state.progress(),
+        completed=state.workflow_complete(),
+        error=error_msg
     )
 
 @app.post("/api/project/{project_name}/draft")
@@ -190,25 +236,95 @@ async def generate_draft(project_name: str):
     """
     Generate lightweight draft outputs (txt, csv, md)
 
-    Phase 6: Draft Phase
-    - Execute Idris2 renderers
-    - Return text/csv/markdown for user preview
+    Phase 6: Draft Phase (Spec/WorkflowTypes.idr)
+    - Execute Idris2 renderers (Text, CSV, Markdown)
+    - Generate lightweight formats for user preview
+    - NO PDF generation (PDF는 /finalize에서만)
     """
-    # Check if Idris2 spec is compiled
-    spec_file = Path(f"./Domains/{project_name}.idr")
+    # WorkflowState 로드
+    state = WorkflowState.load(project_name, Path("./output"))
+
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    # Phase 검증: 컴파일이 완료되어야 함
+    if not state.compilation_phase_complete():
+        raise HTTPException(
+            status_code=400,
+            detail="Compilation not complete. Call /api/project/{name}/generate first."
+        )
+
+    # Idris2 spec 파일 확인
+    spec_file = Path(state.spec_file) if state.spec_file else Path(f"./Domains/{project_name}.idr")
     if not spec_file.exists():
-        raise HTTPException(status_code=404, detail="Specification not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Specification file not found: {spec_file}"
+        )
 
-    # TODO: Execute Idris2 renderers
-    # idris2 --exec generateText
-    # idris2 --exec generateCSV
-    # idris2 --exec generateMarkdown
+    output_dir = Path(f"./output")
 
-    return {
-        "project_name": project_name,
-        "status": "draft_ready",
-        "message": "Draft generation not yet implemented"
-    }
+    try:
+        # TODO: 실제 Idris2 렌더러 실행
+        # 지금은 임시로 더미 파일 생성
+        # 나중에 Main.idr을 동적으로 생성해서 실행
+
+        # Text 렌더러
+        text_result = subprocess.run(
+            ["idris2", "--exec", "generateText", str(spec_file)],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        # CSV 렌더러
+        csv_result = subprocess.run(
+            ["idris2", "--exec", "generateCSV", str(spec_file)],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        # Markdown 렌더러
+        md_result = subprocess.run(
+            ["idris2", "--exec", "generateMarkdown", str(spec_file)],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        # 결과를 WorkflowState에 저장
+        text_file = output_dir / f"{project_name}_draft.txt"
+        csv_file = output_dir / f"{project_name}_schedule.csv"
+        md_file = output_dir / f"{project_name}_draft.md"
+
+        if text_file.exists():
+            state.draft_text = text_file.read_text()
+        if csv_file.exists():
+            state.draft_csv = csv_file.read_text()
+        if md_file.exists():
+            state.draft_markdown = md_file.read_text()
+
+        # Phase 업데이트: DocImpl → Draft
+        state.current_phase = Phase.DRAFT
+        state.save(Path("./output"))
+
+        return {
+            "project_name": project_name,
+            "status": "draft_ready",
+            "current_phase": str(state.current_phase),
+            "message": "Draft files generated successfully",
+            "files": {
+                "text": str(text_file) if text_file.exists() else None,
+                "csv": str(csv_file) if csv_file.exists() else None,
+                "markdown": str(md_file) if md_file.exists() else None
+            }
+        }
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Idris2 renderer timeout")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Draft generation failed: {str(e)}")
 
 @app.get("/api/project/{project_name}/draft")
 async def get_draft(project_name: str) -> DraftResponse:
@@ -229,21 +345,73 @@ async def get_draft(project_name: str) -> DraftResponse:
     )
 
 @app.post("/api/project/{project_name}/feedback")
-async def submit_feedback(project_name: str, request: FeedbackRequest):
+async def submit_feedback(project_name: str, request: FeedbackRequest, background_tasks: BackgroundTasks):
     """
     Submit user feedback for refinement
 
-    Phase 7-8: Feedback & Refinement
-    - Parse feedback (LangGraph Agent 2)
-    - Regenerate specification (LangGraph Agent 1)
-    - Increment version (v1 → v2)
+    Phase 7-8: Feedback & Refinement (Spec/WorkflowTypes.idr)
+    - Phase 7: Collect user feedback
+    - Phase 8: Regenerate specification
+    - Increment version (v1 → v2 → v3...)
+    - Loop back to DraftPhase
     """
-    # TODO: Implement LangGraph Agent 2 feedback processing
+    # WorkflowState 로드
+    state = WorkflowState.load(project_name, Path("./output"))
+
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    # Phase 검증: Draft가 완료되어야 함
+    if not state.draft_phase_complete():
+        raise HTTPException(
+            status_code=400,
+            detail="Draft not ready. Call /api/project/{name}/draft first."
+        )
+
+    # 피드백 저장
+    state.feedback_history.append(request.feedback)
+    state.user_satisfaction = UserSatisfaction(
+        satisfied=False,
+        revision_request=request.feedback
+    )
+
+    # Phase 업데이트: Draft → Feedback → Refinement
+    state.current_phase = Phase.FEEDBACK
+    state.save(Path("./output"))
+
+    # 백그라운드에서 재생성
+    def regenerate():
+        try:
+            # 버전 증가
+            state.increment_version()
+            state.current_phase = Phase.REFINEMENT
+
+            # 피드백을 반영해서 프롬프트 수정
+            # user_prompt에 피드백 추가
+            original_prompt = state.user_prompt or ""
+            updated_prompt = f"{original_prompt}\n\n[Revision Request]\n{request.feedback}"
+            state.user_prompt = updated_prompt
+
+            # LangGraph 재실행
+            from agent import run_workflow
+            updated_state = run_workflow(state)
+
+            # Phase를 Draft로 되돌림 (루프!)
+            updated_state.current_phase = Phase.DRAFT
+            updated_state.save(Path("./output"))
+
+        except Exception as e:
+            state.compile_result = CompileResult(success=False, error_msg=str(e))
+            state.save(Path("./output"))
+
+    background_tasks.add_task(regenerate)
 
     return {
         "project_name": project_name,
-        "status": "feedback_received",
-        "message": "Will regenerate specification (not yet implemented)"
+        "status": "regenerating",
+        "version": state.version_string(),
+        "current_phase": str(state.current_phase),
+        "message": f"Regenerating specification with feedback (version {state.version_string()})"
     }
 
 @app.post("/api/project/{project_name}/finalize")

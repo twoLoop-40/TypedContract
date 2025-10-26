@@ -92,12 +92,60 @@ def save_idris_file(code: str, file_path: str) -> str:
 
 
 def read_reference_doc(file_path: str) -> str:
-    """참고 문서 읽기"""
-    # TODO: PDF/이미지 처리
-    # 현재는 텍스트 파일만
+    """
+    참고 문서 읽기 (PDF, 이미지, 텍스트 지원)
+
+    Supports:
+    - PDF files (.pdf) - PyPDF2로 텍스트 추출
+    - Images (.jpg, .png, .jpeg) - OCR은 나중에 추가 가능
+    - Text files (.txt, .md)
+    """
+    from pathlib import Path
+
+    path = Path(file_path)
+
+    if not path.exists():
+        return f"Error: File not found: {file_path}"
+
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
+        # PDF 처리
+        if path.suffix.lower() == '.pdf':
+            try:
+                from PyPDF2 import PdfReader
+
+                reader = PdfReader(file_path)
+                text = ""
+
+                for page_num, page in enumerate(reader.pages, 1):
+                    page_text = page.extract_text()
+                    text += f"\n--- Page {page_num} ---\n{page_text}\n"
+
+                if not text.strip():
+                    return f"Warning: PDF extracted but no text found: {file_path}"
+
+                return text
+
+            except ImportError:
+                return "Error: PyPDF2 not installed. Run: pip install PyPDF2"
+            except Exception as e:
+                return f"Error reading PDF: {e}"
+
+        # 이미지 처리 (현재는 경고만)
+        elif path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.gif']:
+            return f"Warning: Image file detected: {file_path}\nOCR not yet implemented. Please provide text version."
+
+        # 텍스트 파일
+        else:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+
+    except UnicodeDecodeError:
+        # 바이너리 파일일 경우
+        try:
+            with open(file_path, 'r', encoding='latin-1') as f:
+                return f.read()
+        except Exception as e:
+            return f"Error: Cannot read file (binary?): {e}"
     except Exception as e:
         return f"Error reading file: {e}"
 
@@ -331,6 +379,63 @@ def generate_domain_model(
             print(f"\nLast error:\n{result['last_error']}")
 
     return result
+
+
+# ============================================================================
+# WorkflowState Integration
+# ============================================================================
+
+def run_workflow(workflow_state):
+    """
+    WorkflowState를 받아서 LangGraph 워크플로우 실행
+
+    Args:
+        workflow_state: WorkflowState 객체
+
+    Returns:
+        업데이트된 WorkflowState
+    """
+    # WorkflowState → AgentState 변환
+    agent_state: AgentState = {
+        "project_name": workflow_state.project_name,
+        "document_type": "contract",  # TODO: 프롬프트에서 추론
+        "reference_docs": workflow_state.reference_docs,
+        "analysis": workflow_state.analysis_result,
+        "idris_code": workflow_state.spec_code,
+        "current_file": workflow_state.spec_file or f"Domains/{workflow_state.project_name}.idr",
+        "compile_attempts": workflow_state.compile_attempts,
+        "last_error": workflow_state.compile_result.error_msg if workflow_state.compile_result else None,
+        "compile_success": workflow_state.compilation_phase_complete(),
+        "final_module_path": workflow_state.spec_file,
+        "messages": []
+    }
+
+    # Phase에 따라 시작점 결정
+    from workflow_state import Phase, CompileResult
+
+    # Phase 2: Analysis부터 시작 (Phase 1은 이미 완료)
+    if workflow_state.current_phase == Phase.INPUT:
+        workflow_state.current_phase = Phase.ANALYSIS
+
+    # LangGraph 실행
+    app = create_agent()
+    result = app.invoke(agent_state)
+
+    # 결과를 WorkflowState에 반영
+    workflow_state.analysis_result = result.get("analysis")
+    workflow_state.spec_code = result.get("idris_code")
+    workflow_state.spec_file = result.get("final_module_path")
+    workflow_state.compile_attempts = result.get("compile_attempts", 0)
+
+    if result["compile_success"]:
+        workflow_state.compile_result = CompileResult(success=True)
+        # Phase 진행: Analysis → Spec Generation → Compilation → Doc Impl
+        workflow_state.current_phase = Phase.DOC_IMPL
+    else:
+        error_msg = result.get("last_error", "Unknown error")
+        workflow_state.compile_result = CompileResult(success=False, error_msg=error_msg)
+
+    return workflow_state
 
 
 # ============================================================================
