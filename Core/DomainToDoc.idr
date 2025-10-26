@@ -1,6 +1,6 @@
-module DomainToDoc
+module Core.DomainToDoc
 
-import DocumentModel
+import Core.DocumentModel
 import Domains.ScaleDeep
 import Data.List
 

@@ -1,6 +1,6 @@
-module LaTeXRenderer
+module Core.LaTeXRenderer
 
-import DocumentModel
+import Core.DocumentModel
 import Data.List
 import Data.String
 

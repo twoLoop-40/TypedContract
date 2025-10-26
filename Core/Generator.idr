@@ -1,8 +1,8 @@
-module Generator
+module Core.Generator
 
-import DocumentModel
-import DomainToDoc
-import LaTeXRenderer
+import Core.DocumentModel
+import Core.DomainToDoc
+import Core.LaTeXRenderer
 import Domains.ScaleDeep
 
 ------------------------------------------------------------

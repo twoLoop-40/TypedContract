@@ -3,8 +3,8 @@ module Main
 import System
 import System.File
 import Data.String
-import Generator
-import LaTeXRenderer
+import Core.Generator
+import Core.LaTeXRenderer
 import Domains.ScaleDeep
 
 ------------------------------------------------------------

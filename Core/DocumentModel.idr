@@ -1,4 +1,4 @@
-module DocumentModel
+module Core.DocumentModel
 
 ------------------------------------------------------------
 -- 범용 문서 모델 타입 명세
