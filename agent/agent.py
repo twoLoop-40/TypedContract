@@ -2,13 +2,18 @@
 LangGraph 기반 Idris2 도메인 모델 생성 에이전트
 """
 
+import os
 import subprocess
 from typing import TypedDict, List, Optional, Literal
 from pathlib import Path
 
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from anthropic import Anthropic
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 from prompts import (
     ANALYZE_DOCUMENT_PROMPT,
@@ -49,6 +54,51 @@ class AgentState(TypedDict):
 # ============================================================================
 # Tools
 # ============================================================================
+
+def call_claude(system_prompt: str, user_message: str = "", temperature: float = 0.0) -> str:
+    """
+    Claude Sonnet 4.5 API 호출 헬퍼 함수
+
+    Args:
+        system_prompt: 시스템 프롬프트
+        user_message: 사용자 메시지 (선택)
+        temperature: 생성 온도 (0.0 = deterministic)
+
+    Returns:
+        LLM 응답 텍스트
+    """
+    # API Key 확인
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not found in environment variables. Please set it in .env file.")
+
+    client = Anthropic(api_key=api_key)
+
+    messages = []
+    if user_message:
+        messages.append({
+            "role": "user",
+            "content": user_message
+        })
+    else:
+        # user_message가 없으면 system_prompt를 user message로 사용
+        messages.append({
+            "role": "user",
+            "content": system_prompt
+        })
+        system_prompt = ""
+
+    # API 호출
+    response = client.messages.create(
+        model="claude-sonnet-4-5-20250929",
+        max_tokens=8192,
+        temperature=temperature,
+        system=system_prompt if system_prompt else None,
+        messages=messages
+    )
+
+    return response.content[0].text
+
 
 def typecheck_idris(file_path: str) -> tuple[bool, str]:
     """
@@ -160,9 +210,6 @@ def analyze_document(state: AgentState) -> AgentState:
     """Node 1: 문서 분석"""
     print("\n📄 [1/5] Analyzing document...")
 
-    # LLM 호출
-    llm = ChatOpenAI(model="gpt-4", temperature=0)
-
     # 참고 문서 읽기
     docs_content = "\n\n".join([
         f"[{doc}]\n{read_reference_doc(doc)}"
@@ -174,12 +221,8 @@ def analyze_document(state: AgentState) -> AgentState:
         reference_docs=docs_content
     )
 
-    response = llm.invoke([
-        SystemMessage(content=prompt),
-        HumanMessage(content=docs_content)
-    ])
-
-    analysis = response.content
+    # Claude Sonnet 4.5 호출
+    analysis = call_claude(system_prompt=prompt, user_message=docs_content)
 
     # 분석 결과 저장
     analysis_file = f"direction/analysis_{state['project_name']}.md"
@@ -195,16 +238,13 @@ def generate_idris_code(state: AgentState) -> AgentState:
     """Node 2: Idris2 코드 생성"""
     print("\n⚙️  [2/5] Generating Idris2 code...")
 
-    llm = ChatOpenAI(model="gpt-4", temperature=0)
-
     prompt = GENERATE_IDRIS_PROMPT.format(
         project_name=state["project_name"],
         analysis=state["analysis"]
     )
 
-    response = llm.invoke([SystemMessage(content=prompt)])
-
-    idris_code = response.content.strip()
+    # Claude Sonnet 4.5 호출
+    idris_code = call_claude(system_prompt=prompt).strip()
 
     # 코드 블록 제거 (```idris ... ```)
     if idris_code.startswith("```"):
@@ -246,16 +286,13 @@ def fix_compilation_error(state: AgentState) -> AgentState:
     """Node 4: 에러 수정"""
     print(f"\n🔧 [4/5] Fixing compilation error...")
 
-    llm = ChatOpenAI(model="gpt-4", temperature=0)
-
     prompt = FIX_ERROR_PROMPT.format(
         idris_code=state["idris_code"],
         error_message=state["last_error"]
     )
 
-    response = llm.invoke([SystemMessage(content=prompt)])
-
-    fixed_code = response.content.strip()
+    # Claude Sonnet 4.5 호출
+    fixed_code = call_claude(system_prompt=prompt).strip()
 
     # 코드 블록 제거
     if fixed_code.startswith("```"):
@@ -271,8 +308,6 @@ def fix_compilation_error(state: AgentState) -> AgentState:
 def generate_documentable_impl(state: AgentState) -> AgentState:
     """Node 5: Documentable 인스턴스 생성 (Phase 5)"""
     print("\n📝 [5/7] Generating Documentable instance...")
-
-    llm = ChatOpenAI(model="gpt-4", temperature=0)
 
     # 도메인 코드 읽기
     domain_code = ""
@@ -291,9 +326,8 @@ def generate_documentable_impl(state: AgentState) -> AgentState:
         domain_code=domain_code
     )
 
-    response = llm.invoke([SystemMessage(content=prompt)])
-
-    documentable_code = response.content.strip()
+    # Claude Sonnet 4.5 호출
+    documentable_code = call_claude(system_prompt=prompt).strip()
 
     # 코드 블록 제거
     if documentable_code.startswith("```"):
@@ -319,15 +353,12 @@ def generate_pipeline_impl(state: AgentState) -> AgentState:
     """Node 6: Pipeline 구현 생성 (Phase 5)"""
     print("\n⚙️ [6/7] Generating pipeline implementation...")
 
-    llm = ChatOpenAI(model="gpt-4", temperature=0)
-
     prompt = GENERATE_PIPELINE_PROMPT.format(
         project_name=state["project_name"]
     )
 
-    response = llm.invoke([SystemMessage(content=prompt)])
-
-    pipeline_code = response.content.strip()
+    # Claude Sonnet 4.5 호출
+    pipeline_code = call_claude(system_prompt=prompt).strip()
 
     # 코드 블록 제거
     if pipeline_code.startswith("```"):

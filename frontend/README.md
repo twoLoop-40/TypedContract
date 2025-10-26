@@ -1,4 +1,4 @@
-# ScaleDeepSpec Frontend (Next.js 14)
+# TypedContract Frontend (Next.js 14)
 
 ## Getting Started
 

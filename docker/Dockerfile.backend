@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     libgmp-dev \
     uuid-dev \
     libncurses-dev \
+    libx11-dev \
     texlive-xetex \
     texlive-latex-extra \
     texlive-fonts-recommended \
@@ -48,12 +49,13 @@ RUN wget https://github.com/idris-lang/Idris2/archive/refs/tags/v0.7.0.tar.gz &&
     tar -xzf v0.7.0.tar.gz && \
     cd Idris2-0.7.0 && \
     make bootstrap SCHEME=scheme && \
-    make install && \
+    make install PREFIX=/usr/local && \
     cd / && \
     rm -rf /tmp/Idris2-0.7.0 /tmp/v0.7.0.tar.gz
 
-# Verify Idris2 installation
-RUN idris2 --version
+# Add Idris2 to PATH and verify
+ENV PATH="/root/.idris2/bin:${PATH}"
+RUN idris2 --version || (find /root/.idris2 -name idris2 && /root/.idris2/bin/idris2 --version)
 
 # Set working directory
 WORKDIR /app

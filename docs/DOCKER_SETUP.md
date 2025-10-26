@@ -21,7 +21,7 @@
 ## 프로젝트 구조
 
 ```
-ScaleDeepSpec/
+TypedContract/
 ├── docker-compose.yml          # 오케스트레이션 설정
 ├── docker/
 │   ├── Dockerfile.backend      # FastAPI + Idris2
@@ -203,7 +203,7 @@ volumes:
 
 ```yaml
 networks:
-  scaledeepspec_network:
+  typedcontract_network:
     driver: bridge
 ```
 

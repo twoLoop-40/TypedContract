@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project Overview: TypedContract
 
-This is a **formal document generation system** with three main components:
+This is a **type-safe contract and document generation system** with three main components:
 
 1. **Idris2 Core Framework**: Dependent type specifications for domain models and document generation
 2. **FastAPI Backend**: Python agent system that orchestrates Idris2 compilation and document generation
@@ -15,7 +15,7 @@ The system uses dependent types to guarantee correctness at compile-time and pro
 ## Directory Structure
 
 ```
-ScaleDeepSpec/
+TypedContract/
 ├── Core/                       # Idris2 document generation framework
 │   ├── DocumentModel.idr      # Generic document structure (headings, paragraphs, tables)
 │   ├── DomainToDoc.idr        # Converts domain models → document models
@@ -88,6 +88,98 @@ ScaleDeepSpec/
 ### ❌ Not Started
 
 - **Frontend**: Next.js 14 UI (0%)
+
+---
+
+## Development Environment Setup
+
+### Prerequisites
+
+- **Idris2 v0.7.0+**: Required for type-checking and compilation
+- **Python 3.11+**: Backend runtime
+- **Node.js 18+**: Frontend runtime
+- **Docker**: For containerized development (recommended)
+- **uv**: Fast Python package installer (recommended)
+
+### Local Development Setup (Without Docker)
+
+#### 1. Install Idris2
+
+**Option A: Homebrew (macOS)**
+```bash
+brew install idris2
+```
+
+**Option B: From source**
+```bash
+# Install Chez Scheme first
+brew install chezscheme  # macOS
+# OR: apt-get install chezscheme  # Ubuntu
+
+# Build Idris2
+git clone https://github.com/idris-lang/Idris2.git
+cd Idris2
+make bootstrap SCHEME=scheme
+make install PREFIX=/usr/local
+```
+
+#### 2. Install Python Dependencies
+
+**Recommended: Use uv (faster)**
+```bash
+cd agent/
+
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv pip install --system -r requirements.txt
+```
+
+**Alternative: Use pip**
+```bash
+cd agent/
+pip install -r requirements.txt
+```
+
+**Note**: Some packages (like pandas) may require compilation. If build errors occur, you can skip non-essential packages and install only core dependencies:
+```bash
+# Core packages only
+uv pip install --system anthropic fastapi uvicorn langgraph langchain python-dotenv pydantic
+```
+
+#### 3. Configure Environment Variables
+
+```bash
+# Create .env file in project root
+cp .env.example .env
+
+# Edit .env and add your API keys
+# ANTHROPIC_API_KEY=sk-ant-api03-...
+```
+
+#### 4. Verify Installation
+
+```bash
+# Check Idris2
+idris2 --version
+# Expected: Idris 2, version 0.7.0
+
+# Check Python packages
+python -c "import anthropic, fastapi, langgraph; print('✅ Core packages OK')"
+
+# Check API key
+python -c "from dotenv import load_dotenv; import os; load_dotenv(); print('✅ API Key loaded' if os.getenv('ANTHROPIC_API_KEY') else '❌ No API key')"
+```
+
+#### 5. Run Backend Server
+
+```bash
+cd agent/
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Access API docs at: http://localhost:8000/docs
 
 ---
 

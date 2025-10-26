@@ -1,5 +1,5 @@
 """
-FastAPI Backend for ScaleDeepSpec
+FastAPI Backend for TypedContract
 Handles document upload, Idris2 generation, and user feedback
 """
 
@@ -25,8 +25,8 @@ from workflow_state import (
 from agent import run_workflow
 
 app = FastAPI(
-    title="ScaleDeepSpec API",
-    description="Document generation system with formal specifications",
+    title="TypedContract API",
+    description="Type-safe contract and document generation system with formal specifications",
     version="1.0.0"
 )
 
