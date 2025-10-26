@@ -1,6 +1,39 @@
 module Domains.ApprovalNarrative
 
--- 사전승인서 "세부내용" 전용 타입
+------------------------------------------------------------
+-- 외주용역 사전승인 신청서 도메인 모델
+-- 목적: 사업비 집행 전 외주용역 사전승인을 위한 서류
+------------------------------------------------------------
+
+------------------------------------------------------------
+-- 1. 사전승인서 기본 정보
+------------------------------------------------------------
+
+public export
+record ApprovalMetadata where
+  constructor MkApprovalMeta
+  applicant : String          -- 신청자
+  department : String         -- 부서
+  applicationDate : String    -- 신청일
+  projectName : String        -- 과제명
+
+------------------------------------------------------------
+-- 2. 외주용역 계약 정보
+------------------------------------------------------------
+
+public export
+record OutsourcingDetails where
+  constructor MkOutsourcingDetails
+  vendorName : String         -- 거래처명
+  contractPeriod : (String, String)  -- 계약기간 (시작일, 종료일)
+  totalAmount : Nat          -- 총 계약금액
+  taskDescription : String    -- 작업 내용
+
+------------------------------------------------------------
+-- 3. 사전승인서 "세부내용" 섹션
+------------------------------------------------------------
+
+public export
 record NarrativeSection where
   constructor MkNarrative
   purpose           : String   -- 1) 과제 수행 목적
@@ -9,7 +42,23 @@ record NarrativeSection where
   goalsQualitative  : String   -- 4-가) 목표(정성)
   goalsQuantitative : String   -- 4-나) 목표(정량)
 
--- 스피라티 사전승인서 제출용 "세부내용" 완성본
+------------------------------------------------------------
+-- 4. 사전승인 신청서 전체 구조
+------------------------------------------------------------
+
+public export
+record ApprovalDocument where
+  constructor MkApprovalDoc
+  metadata : ApprovalMetadata
+  outsourcing : OutsourcingDetails
+  narrative : NarrativeSection
+
+------------------------------------------------------------
+-- 5. 스피라티 사전승인서 데이터
+------------------------------------------------------------
+
+-- 세부내용 섹션
+public export
 narrativeForApproval : NarrativeSection
 narrativeForApproval = MkNarrative
   -- 1) 과제 수행 목적
@@ -26,3 +75,29 @@ narrativeForApproval = MkNarrative
 
   -- 4-나) 목표(정량)
   "- 총 투입 물량: 50,650문항 (단가 1,000원/문항)\n- 산출 형식: 각 납품 차수마다 LaTeX(.tex) + HWP 편집본 동시 제출\n- 납품 일정/물량(누계 기준):\n  · 1차 2025-11-05 ≥ 20,000문항\n  · 2차 2025-11-20 ≥ 40,000문항\n  · 3차 2025-11-30 = 50,650문항(최종)\n- 품질 지표: 정확도 ≥ 98%, 오탈자·수식누락 ≤ 2%\n- 보고 체계: 차수별 검수 리포트 3건(11/5, 11/20, 11/30) + 최종 결과요약 1건"
+
+-- 메타데이터
+public export
+approvalMetadataSpirati : ApprovalMetadata
+approvalMetadataSpirati = MkApprovalMeta
+  "홍길동"                    -- 신청자
+  "기술개발팀"                -- 부서
+  "2025년 9월 30일"          -- 신청일
+  "AI 기반 수학문항 데이터베이스 구축 및 서비스 고도화"  -- 과제명
+
+-- 외주용역 상세
+public export
+outsourcingDetailsSpirati : OutsourcingDetails
+outsourcingDetailsSpirati = MkOutsourcingDetails
+  "주식회사 이츠에듀"        -- 거래처명
+  ("2025년 10월 1일", "2025년 11월 30일")  -- 계약기간
+  55715000                   -- 총 계약금액 (VAT 포함)
+  "수학문항 입력 및 검수 용역 (총 50,650문항)"  -- 작업 내용
+
+-- 완성된 사전승인 신청서
+public export
+approvalDocumentSpirati : ApprovalDocument
+approvalDocumentSpirati = MkApprovalDoc
+  approvalMetadataSpirati
+  outsourcingDetailsSpirati
+  narrativeForApproval
