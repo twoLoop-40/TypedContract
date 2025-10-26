@@ -194,7 +194,7 @@ record RetryPolicy where
 public export
 defaultRetryPolicy : RetryPolicy
 defaultRetryPolicy = MkRetryPolicy
-  3      -- 문법 에러: 최대 3회
+  5      -- 문법 에러: 최대 5회 (실제 사용 경험 반영)
   0      -- 증명 실패: 자동 재시도 없음 (사용자 개입)
   0      -- 도메인 에러: 자동 재시도 없음 (재분석 필요)
   False  -- 증명 실패는 자동 재시도 안함

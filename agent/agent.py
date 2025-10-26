@@ -542,8 +542,8 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
     strategy = state.get("error_strategy")
 
     if strategy == "auto_fix":
-        # 문법 에러 - 자동 수정 시도 (최대 3회)
-        if state["compile_attempts"] < 3:
+        # 문법 에러 - 자동 수정 시도 (최대 5회)
+        if state["compile_attempts"] < 5:
             return "fix_error"
         else:
             return "fail"

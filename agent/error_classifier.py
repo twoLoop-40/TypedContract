@@ -198,7 +198,7 @@ class RetryPolicy:
 
 # 기본 재시도 정책 (Spec/ErrorHandling.idr:182-188)
 DEFAULT_RETRY_POLICY = RetryPolicy(
-    max_syntax_retries=3,
+    max_syntax_retries=5,  # 실제 사용 경험 반영: 3회 → 5회
     max_proof_retries=0,
     max_domain_retries=0,
     auto_retry_proof=False,
