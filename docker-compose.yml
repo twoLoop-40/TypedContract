@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Backend: FastAPI + Idris2
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: scaledeepspec_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./agent:/app/agent
+      - ./Spec:/app/Spec
+      - ./Core:/app/Core
+      - ./Domains:/app/Domains
+      - ./output:/app/output
+      - ./direction:/app/direction
+    environment:
+      - PYTHONUNBUFFERED=1
+      - IDRIS2_PATH=/usr/local/bin/idris2
+    command: uvicorn agent.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - scaledeepspec_network
+
+  # Frontend: Next.js 14
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: scaledeepspec_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NODE_ENV=development
+    depends_on:
+      - backend
+    command: npm run dev
+    networks:
+      - scaledeepspec_network
+
+networks:
+  scaledeepspec_network:
+    driver: bridge
+
+volumes:
+  node_modules:
+  next_cache:

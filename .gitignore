@@ -26,3 +26,28 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Docker
+.env
+docker-compose.override.yml
+
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+
+# Backend (Python)
+agent/__pycache__/
+agent/.pytest_cache/
+agent/.coverage
+agent/htmlcov/
+agent/*.pyc
+agent/*.pyo
+agent/*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/

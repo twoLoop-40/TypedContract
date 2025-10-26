@@ -1,0 +1,54 @@
+# Backend Dockerfile: FastAPI + Idris2 + LaTeX
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    git \
+    build-essential \
+    libgmp-dev \
+    texlive-xetex \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    texlive-lang-korean \
+    fonts-nanum \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Idris2
+WORKDIR /tmp
+RUN wget https://github.com/idris-lang/Idris2/archive/refs/tags/v0.7.0.tar.gz && \
+    tar -xzf v0.7.0.tar.gz && \
+    cd Idris2-0.7.0 && \
+    make bootstrap SCHEME=chez && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/Idris2-0.7.0 /tmp/v0.7.0.tar.gz
+
+# Verify Idris2 installation
+RUN idris2 --version
+
+# Set working directory
+WORKDIR /app
+
+# Copy Python requirements
+COPY agent/requirements.txt /app/agent/requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r /app/agent/requirements.txt
+
+# Copy project files
+COPY . /app
+
+# Create output directory
+RUN mkdir -p /app/output
+
+# Expose FastAPI port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Default command (overridden by docker-compose)
+CMD ["uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "8000"]
