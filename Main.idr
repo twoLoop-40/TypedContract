@@ -1,6 +1,8 @@
 module Main
 
+import System
 import System.File
+import Data.String
 import Generator
 import LaTeXRenderer
 import Domains.ScaleDeep
@@ -27,11 +29,42 @@ writeLatexFile pipeline = do
 -- 2. PDF 컴파일 (pdflatex 호출)
 ------------------------------------------------------------
 
+-- 경로에서 디렉토리 제거 (output/file.tex -> file.tex)
+stripOutputDir : String -> String
+stripOutputDir path =
+  case unpack path of
+    [] => ""
+    cs => if isPrefixOf (unpack "output/") cs
+          then pack (drop 7 cs)
+          else path
+
+-- .tex 확장자 제거
+removeTex : String -> String
+removeTex path =
+  if isSuffixOf ".tex" path
+    then pack (take (minus (length path) 4) (unpack path))
+    else path
+
 compilePDF : String -> IO (Either String String)
 compilePDF texPath = do
-  -- TODO: system 함수로 pdflatex 실행
-  -- system $ "pdflatex " ++ texPath
-  pure (Right $ "PDF would be compiled from: " ++ texPath)
+  -- pdflatex를 output 디렉토리에서 실행
+  -- -interaction=nonstopmode: 에러 시 멈추지 않음
+  let filename = stripOutputDir texPath
+  let cmd = "cd output && pdflatex -interaction=nonstopmode \"" ++
+            filename ++ "\" > /dev/null 2>&1"
+
+  exitCode <- System.system cmd
+
+  if exitCode == 0
+    then do
+      -- PDF 생성 성공 - .aux, .log 등 불필요한 파일 정리
+      let cleanCmd = "cd output && rm -f *.aux *.log *.out"
+      _ <- System.system cleanCmd
+      let pdfPath = removeTex texPath
+      pure (Right $ "PDF compiled successfully: " ++ pdfPath)
+    else
+      pure (Left $ "PDF compilation failed (exit code " ++ show exitCode ++
+                   "). Check output/*.log for details.")
 
 
 ------------------------------------------------------------
