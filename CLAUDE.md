@@ -62,6 +62,35 @@ ScaleDeepSpec/
 └── output/                     # Generated documents
 ```
 
+## Project Status (Updated: 2025-10-27)
+
+### ✅ Completed Components
+
+- **Idris2 Core Framework** (100%): All renderers and generator working
+- **Domain Models** (100%): ScaleDeep and ApprovalNarrative examples
+- **Spec/** (100%): Complete workflow type specifications
+- **Backend API** (100%): All major endpoints implemented
+  - POST /api/project/init
+  - POST /api/project/{name}/generate (LangGraph integration)
+  - GET /api/project/{name}/status
+  - POST /api/project/{name}/draft
+  - GET /api/project/{name}/draft
+  - POST /api/project/{name}/feedback
+- **WorkflowState** (100%): Python implementation of Spec/WorkflowTypes.idr
+  - 17 unit tests passing ✅
+- **Tests** (80%): workflow_state and API endpoint tests written
+
+### ⚠️ In Progress
+
+- **Docker Environment**: Debugging Chez Scheme installation for Idris2
+- **End-to-End Testing**: Pending Docker environment fix
+
+### ❌ Not Started
+
+- **Frontend**: Next.js 14 UI (0%)
+
+---
+
 ## Common Development Commands
 
 ### Docker (Recommended)
