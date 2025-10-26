@@ -1,27 +1,53 @@
 # Backend Dockerfile: FastAPI + Idris2 + LaTeX
-FROM python:3.11-slim
+# Ubuntu base for better compatibility
 
-# Install system dependencies
+FROM ubuntu:22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies (Python + LaTeX + Build tools)
 RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3-pip \
     wget \
     curl \
     git \
     build-essential \
     libgmp-dev \
+    uuid-dev \
+    libncurses-dev \
     texlive-xetex \
     texlive-latex-extra \
     texlive-fonts-recommended \
     texlive-lang-korean \
     fonts-nanum \
-    chezscheme \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Idris2
+# Create symlinks for python
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python3
+
+# Install Chez Scheme from source
+WORKDIR /tmp
+RUN wget https://github.com/cisco/ChezScheme/releases/download/v10.0.0/csv10.0.0.tar.gz && \
+    tar -xzf csv10.0.0.tar.gz && \
+    cd csv10.0.0 && \
+    ./configure --threads && \
+    make && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/csv10.0.0 /tmp/csv10.0.0.tar.gz
+
+# Verify Chez Scheme
+RUN scheme --version
+
+# Install Idris2 from source with Chez backend
 WORKDIR /tmp
 RUN wget https://github.com/idris-lang/Idris2/archive/refs/tags/v0.7.0.tar.gz && \
     tar -xzf v0.7.0.tar.gz && \
     cd Idris2-0.7.0 && \
-    make bootstrap SCHEME=chez && \
+    make bootstrap SCHEME=scheme && \
     make install && \
     cd / && \
     rm -rf /tmp/Idris2-0.7.0 /tmp/v0.7.0.tar.gz

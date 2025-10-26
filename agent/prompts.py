@@ -293,3 +293,219 @@ FINAL_REVIEW_PROMPT = """생성된 Idris2 도메인 모델이 타입 체크를 �
 - Core/Generator.idr에 파이프라인 생성
 - Main.idr에서 실행
 """
+
+
+# Documentable 인스턴스 생성 프롬프트 (Phase 5)
+GENERATE_DOCUMENTABLE_PROMPT = """당신은 Idris2 전문가입니다.
+
+다음 도메인 모델에 대한 **Documentable 인스턴스**를 생성하세요.
+
+프로젝트명: {project_name}
+
+도메인 모델 코드:
+```idris
+{domain_code}
+```
+
+## 요구사항
+
+1. **모듈 구조**
+```idris
+module DomainToDoc.{project_name}
+
+import Core.DocumentModel
+import Domains.{project_name}
+import Data.List
+```
+
+2. **헬퍼 함수들**
+
+도메인의 각 레코드 타입을 DocElement로 변환하는 헬퍼 함수를 작성하세요:
+
+```idris
+------------------------------------------------------------
+-- 헬퍼 함수: 각 타입 → DocElement
+------------------------------------------------------------
+
+-- Party 정보를 DocElement로 변환 (있다면)
+partyToElements : String -> Party -> List DocElement
+partyToElements role party =
+  [ Heading 3 ("[" ++ role ++ "]")
+  , Para ("회 사 명: " ++ party.companyName)
+  , Para ("대 표 자: " ++ party.representative)
+  -- ... 필요한 필드들
+  , VSpace 5
+  ]
+
+-- 다른 복합 타입들도 변환 함수 작성
+```
+
+3. **Documentable 인스턴스**
+
+메인 도메인 타입(예: ServiceContract, ApprovalForm 등)에 대한 Documentable 인스턴스:
+
+```idris
+------------------------------------------------------------
+-- Documentable 인스턴스
+------------------------------------------------------------
+
+public export
+Documentable {MainDomainType} where
+  toDocument obj =
+    let
+      -- 헤더
+      header =
+        [ Heading 1 "{문서 제목}"
+        , VSpace 5
+        , Para ("번호: " ++ obj.documentNumber)
+        , Para ("날짜: " ++ obj.date)
+        , VSpace 10
+        ]
+
+      -- 본문 섹션들
+      body =
+        [ Heading 2 "제1절"
+        , Para "내용..."
+        -- ... 문서 구조에 맞게
+        ]
+
+      -- 전체 본문
+      fullBody = header ++ body
+
+      -- 메타데이터
+      metadata = MkMetadata
+        "{문서 제목}"
+        "{작성자}"
+        "{날짜}"
+        "{문서 번호}"
+
+    in MkDoc metadata fullBody
+```
+
+## 참고: Core/DomainToDoc.idr 예제
+
+ServiceContract의 Documentable 구현을 참고하세요:
+
+```idris
+Documentable ServiceContract where
+  toDocument sc =
+    let
+      header = [ Heading 1 "용 역 계 약 서", VSpace 5, ... ]
+      preamble = [ Para (sc.client.companyName ++ "..."), ... ]
+      articles = termsToArticles sc.terms
+      closing = [ VSpace 10, Para "본 계약의 성립을...", ... ]
+      parties = partyToElements "갑" sc.client ++ partyToElements "을" sc.contractor
+      fullBody = header ++ preamble ++ articles ++ closing ++ parties
+      metadata = MkMetadata "용역계약서" ...
+    in MkDoc metadata fullBody
+```
+
+## 중요 규칙
+
+1. ✅ 모든 함수에 `public export` 사용
+2. ✅ 문서 구조는 논리적으로 구성 (헤더 → 본문 → 결어 → 당사자)
+3. ✅ VSpace로 적절한 여백 추가
+4. ✅ Heading 레벨 올바르게 사용 (1=제목, 2=섹션, 3=항목)
+5. ✅ 리스트는 OrderedList, BulletList 활용
+6. ✅ 표가 필요하면 SimpleTable 사용
+7. ✅ PageBreak로 페이지 구분 (필요시)
+
+**완전하고 타입 체크 가능한 Idris2 코드를 생성하세요.**
+
+출력 형식: 순수 Idris2 코드만 (설명 없이)
+"""
+
+
+# 파이프라인 생성 프롬프트 (Phase 5)
+GENERATE_PIPELINE_PROMPT = """당신은 Idris2 전문가입니다.
+
+다음 프로젝트에 대한 **실행 가능한 파이프라인**을 생성하세요.
+
+프로젝트명: {project_name}
+
+## 요구사항
+
+1. **모듈 구조**
+```idris
+module Pipeline.{project_name}
+
+import Domains.{project_name}
+import DomainToDoc.{project_name}
+import Core.DocumentModel
+import Core.TextRenderer
+import Core.CSVRenderer
+import Core.MarkdownRenderer
+import Core.LaTeXRenderer
+```
+
+2. **렌더링 함수들**
+
+```idris
+------------------------------------------------------------
+-- 렌더러 실행
+------------------------------------------------------------
+
+-- Text 렌더링
+public export
+generateText : {MainDomainType} -> String
+generateText obj =
+  let doc = toDocument obj
+  in renderText doc
+
+-- CSV 렌더링
+public export
+generateCSV : {MainDomainType} -> String
+generateCSV obj =
+  let doc = toDocument obj
+  in renderCSV doc
+
+-- Markdown 렌더링
+public export
+generateMarkdown : {MainDomainType} -> String
+generateMarkdown obj =
+  let doc = toDocument obj
+  in renderMarkdown doc
+
+-- LaTeX 렌더링
+public export
+generateLaTeX : {MainDomainType} -> String
+generateLaTeX obj =
+  let doc = toDocument obj
+      latexDoc = renderDocument doc
+  in extractSource latexDoc
+```
+
+3. **구체적 인스턴스 사용**
+
+도메인 모델에 정의된 구체적 인스턴스(예: `exampleContract`, `sampleForm`)를 사용:
+
+```idris
+------------------------------------------------------------
+-- 구체적 인스턴스 렌더링
+------------------------------------------------------------
+
+public export
+exampleText : String
+exampleText = generateText example{MainDomainType}
+
+public export
+exampleCSV : String
+exampleCSV = generateCSV example{MainDomainType}
+
+public export
+exampleMarkdown : String
+exampleMarkdown = generateMarkdown example{MainDomainType}
+
+public export
+exampleLaTeX : String
+exampleLaTeX = generateLaTeX example{MainDomainType}
+```
+
+## 참고 예제
+
+Core/Generator.idr의 파이프라인 구조를 참고하세요.
+
+**완전하고 실행 가능한 Idris2 코드를 생성하세요.**
+
+출력 형식: 순수 Idris2 코드만 (설명 없이)
+"""

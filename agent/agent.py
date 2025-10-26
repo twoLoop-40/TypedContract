@@ -14,7 +14,9 @@ from prompts import (
     ANALYZE_DOCUMENT_PROMPT,
     GENERATE_IDRIS_PROMPT,
     FIX_ERROR_PROMPT,
-    FINAL_REVIEW_PROMPT
+    FINAL_REVIEW_PROMPT,
+    GENERATE_DOCUMENTABLE_PROMPT,
+    GENERATE_PIPELINE_PROMPT
 )
 
 
@@ -266,6 +268,87 @@ def fix_compilation_error(state: AgentState) -> AgentState:
     return state
 
 
+def generate_documentable_impl(state: AgentState) -> AgentState:
+    """Node 5: Documentable 인스턴스 생성 (Phase 5)"""
+    print("\n📝 [5/7] Generating Documentable instance...")
+
+    llm = ChatOpenAI(model="gpt-4", temperature=0)
+
+    # 도메인 코드 읽기
+    domain_code = ""
+    if state["idris_code"]:
+        domain_code = state["idris_code"]
+    else:
+        # 파일에서 읽기
+        try:
+            with open(state["current_file"], 'r', encoding='utf-8') as f:
+                domain_code = f.read()
+        except:
+            domain_code = "# Domain code not available"
+
+    prompt = GENERATE_DOCUMENTABLE_PROMPT.format(
+        project_name=state["project_name"],
+        domain_code=domain_code
+    )
+
+    response = llm.invoke([SystemMessage(content=prompt)])
+
+    documentable_code = response.content.strip()
+
+    # 코드 블록 제거
+    if documentable_code.startswith("```"):
+        lines = documentable_code.split("\n")
+        documentable_code = "\n".join(lines[1:-1])
+
+    # 파일 저장
+    documentable_file = f"DomainToDoc/{state['project_name']}.idr"
+    save_msg = save_idris_file(documentable_code, documentable_file)
+
+    # 타입 체크
+    success, output = typecheck_idris(documentable_file)
+
+    if success:
+        state["messages"].append(f"✅ Documentable instance 생성 완료: {documentable_file}")
+    else:
+        state["messages"].append(f"⚠️ Documentable 타입 체크 실패:\n{output}")
+
+    return state
+
+
+def generate_pipeline_impl(state: AgentState) -> AgentState:
+    """Node 6: Pipeline 구현 생성 (Phase 5)"""
+    print("\n⚙️ [6/7] Generating pipeline implementation...")
+
+    llm = ChatOpenAI(model="gpt-4", temperature=0)
+
+    prompt = GENERATE_PIPELINE_PROMPT.format(
+        project_name=state["project_name"]
+    )
+
+    response = llm.invoke([SystemMessage(content=prompt)])
+
+    pipeline_code = response.content.strip()
+
+    # 코드 블록 제거
+    if pipeline_code.startswith("```"):
+        lines = pipeline_code.split("\n")
+        pipeline_code = "\n".join(lines[1:-1])
+
+    # 파일 저장
+    pipeline_file = f"Pipeline/{state['project_name']}.idr"
+    save_msg = save_idris_file(pipeline_code, pipeline_file)
+
+    # 타입 체크
+    success, output = typecheck_idris(pipeline_file)
+
+    if success:
+        state["messages"].append(f"✅ Pipeline 구현 완료: {pipeline_file}")
+    else:
+        state["messages"].append(f"⚠️ Pipeline 타입 체크 실패:\n{output}")
+
+    return state
+
+
 # ============================================================================
 # Conditional Logic
 # ============================================================================
@@ -295,23 +378,29 @@ def create_agent() -> StateGraph:
     workflow.add_node("generate", generate_idris_code)
     workflow.add_node("typecheck", typecheck_code)
     workflow.add_node("fix_error", fix_compilation_error)
+    workflow.add_node("gen_documentable", generate_documentable_impl)  # Phase 5
+    workflow.add_node("gen_pipeline", generate_pipeline_impl)           # Phase 5
 
     # 엣지 정의
     workflow.add_edge("analyze", "generate")
     workflow.add_edge("generate", "typecheck")
 
-    # 조건부 엣지
+    # 조건부 엣지 (컴파일 성공 시 Phase 5로)
     workflow.add_conditional_edges(
         "typecheck",
         should_continue,
         {
-            "finish": END,
+            "finish": "gen_documentable",  # 성공 시 Phase 5로
             "fail": END,
             "fix_error": "fix_error"
         }
     )
 
     workflow.add_edge("fix_error", "typecheck")
+
+    # Phase 5: Documentable → Pipeline → END
+    workflow.add_edge("gen_documentable", "gen_pipeline")
+    workflow.add_edge("gen_pipeline", END)
 
     # 시작점
     workflow.set_entry_point("analyze")
@@ -429,8 +518,23 @@ def run_workflow(workflow_state):
 
     if result["compile_success"]:
         workflow_state.compile_result = CompileResult(success=True)
-        # Phase 진행: Analysis → Spec Generation → Compilation → Doc Impl
-        workflow_state.current_phase = Phase.DOC_IMPL
+
+        # Phase 5 결과 반영
+        # Documentable과 Pipeline 파일이 생성되었는지 확인
+        from pathlib import Path
+        documentable_file = Path(f"DomainToDoc/{workflow_state.project_name}.idr")
+        pipeline_file = Path(f"Pipeline/{workflow_state.project_name}.idr")
+
+        if documentable_file.exists():
+            workflow_state.documentable_impl = documentable_file.read_text(encoding='utf-8')
+        if pipeline_file.exists():
+            workflow_state.pipeline_impl = pipeline_file.read_text(encoding='utf-8')
+
+        # Phase 진행: Analysis → Spec Generation → Compilation → Doc Impl → Draft
+        if workflow_state.documentable_impl and workflow_state.pipeline_impl:
+            workflow_state.current_phase = Phase.DRAFT  # Phase 6로 이동
+        else:
+            workflow_state.current_phase = Phase.DOC_IMPL  # Phase 5 미완성
     else:
         error_msg = result.get("last_error", "Unknown error")
         workflow_state.compile_result = CompileResult(success=False, error_msg=error_msg)
