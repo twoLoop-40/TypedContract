@@ -349,6 +349,81 @@ def generate_pipeline_impl(state: AgentState) -> AgentState:
     return state
 
 
+def generate_draft_outputs(state: AgentState) -> AgentState:
+    """Node 7: 초안 생성 (Phase 6 - Draft Phase)"""
+    print("\n📄 [7/7] Generating draft outputs (txt, csv, md)...")
+
+    project_name = state["project_name"]
+    pipeline_file = f"Pipeline/{project_name}.idr"
+
+    # 렌더러 함수들을 idris2 --exec로 실행
+    outputs = {}
+
+    # Text 렌더러
+    try:
+        result = subprocess.run(
+            ["idris2", "--exec", f"exampleText", pipeline_file],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=Path(__file__).parent.parent
+        )
+        if result.returncode == 0:
+            outputs["text"] = result.stdout
+            state["messages"].append("✅ Text 렌더링 완료")
+        else:
+            state["messages"].append(f"⚠️ Text 렌더링 실패: {result.stderr}")
+    except Exception as e:
+        state["messages"].append(f"⚠️ Text 렌더링 에러: {str(e)}")
+
+    # CSV 렌더러
+    try:
+        result = subprocess.run(
+            ["idris2", "--exec", f"exampleCSV", pipeline_file],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=Path(__file__).parent.parent
+        )
+        if result.returncode == 0:
+            outputs["csv"] = result.stdout
+            state["messages"].append("✅ CSV 렌더링 완료")
+        else:
+            state["messages"].append(f"⚠️ CSV 렌더링 실패: {result.stderr}")
+    except Exception as e:
+        state["messages"].append(f"⚠️ CSV 렌더링 에러: {str(e)}")
+
+    # Markdown 렌더러
+    try:
+        result = subprocess.run(
+            ["idris2", "--exec", f"exampleMarkdown", pipeline_file],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=Path(__file__).parent.parent
+        )
+        if result.returncode == 0:
+            outputs["markdown"] = result.stdout
+            state["messages"].append("✅ Markdown 렌더링 완료")
+        else:
+            state["messages"].append(f"⚠️ Markdown 렌더링 실패: {result.stderr}")
+    except Exception as e:
+        state["messages"].append(f"⚠️ Markdown 렌더링 에러: {str(e)}")
+
+    # 출력 저장
+    output_dir = Path(f"./output/{project_name}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if outputs.get("text"):
+        (output_dir / f"{project_name}_draft.txt").write_text(outputs["text"], encoding='utf-8')
+    if outputs.get("csv"):
+        (output_dir / f"{project_name}_schedule.csv").write_text(outputs["csv"], encoding='utf-8')
+    if outputs.get("markdown"):
+        (output_dir / f"{project_name}_draft.md").write_text(outputs["markdown"], encoding='utf-8')
+
+    return state
+
+
 # ============================================================================
 # Conditional Logic
 # ============================================================================
@@ -380,6 +455,7 @@ def create_agent() -> StateGraph:
     workflow.add_node("fix_error", fix_compilation_error)
     workflow.add_node("gen_documentable", generate_documentable_impl)  # Phase 5
     workflow.add_node("gen_pipeline", generate_pipeline_impl)           # Phase 5
+    workflow.add_node("gen_draft", generate_draft_outputs)              # Phase 6
 
     # 엣지 정의
     workflow.add_edge("analyze", "generate")
@@ -398,9 +474,10 @@ def create_agent() -> StateGraph:
 
     workflow.add_edge("fix_error", "typecheck")
 
-    # Phase 5: Documentable → Pipeline → END
+    # Phase 5-6: Documentable → Pipeline → Draft → END
     workflow.add_edge("gen_documentable", "gen_pipeline")
-    workflow.add_edge("gen_pipeline", END)
+    workflow.add_edge("gen_pipeline", "gen_draft")
+    workflow.add_edge("gen_draft", END)
 
     # 시작점
     workflow.set_entry_point("analyze")
@@ -530,9 +607,25 @@ def run_workflow(workflow_state):
         if pipeline_file.exists():
             workflow_state.pipeline_impl = pipeline_file.read_text(encoding='utf-8')
 
-        # Phase 진행: Analysis → Spec Generation → Compilation → Doc Impl → Draft
-        if workflow_state.documentable_impl and workflow_state.pipeline_impl:
-            workflow_state.current_phase = Phase.DRAFT  # Phase 6로 이동
+        # Phase 6 결과 반영
+        # 초안 파일들이 생성되었는지 확인
+        output_dir = Path(f"./output/{workflow_state.project_name}")
+        text_file = output_dir / f"{workflow_state.project_name}_draft.txt"
+        csv_file = output_dir / f"{workflow_state.project_name}_schedule.csv"
+        md_file = output_dir / f"{workflow_state.project_name}_draft.md"
+
+        if text_file.exists():
+            workflow_state.draft_text = text_file.read_text(encoding='utf-8')
+        if csv_file.exists():
+            workflow_state.draft_csv = csv_file.read_text(encoding='utf-8')
+        if md_file.exists():
+            workflow_state.draft_markdown = md_file.read_text(encoding='utf-8')
+
+        # Phase 진행: Analysis → Spec Generation → Compilation → Doc Impl → Draft → Feedback
+        if workflow_state.draft_text or workflow_state.draft_markdown:
+            workflow_state.current_phase = Phase.FEEDBACK  # Phase 7로 이동
+        elif workflow_state.documentable_impl and workflow_state.pipeline_impl:
+            workflow_state.current_phase = Phase.DRAFT  # Phase 6 진행 중
         else:
             workflow_state.current_phase = Phase.DOC_IMPL  # Phase 5 미완성
     else:

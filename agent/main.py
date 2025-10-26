@@ -247,31 +247,30 @@ async def generate_draft(project_name: str):
     if state is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
 
-    # Phase 검증: 컴파일이 완료되어야 함
-    if not state.compilation_phase_complete():
+    # Phase 검증: Doc Impl이 완료되어야 함
+    if not state.doc_impl_phase_complete():
         raise HTTPException(
             status_code=400,
-            detail="Compilation not complete. Call /api/project/{name}/generate first."
+            detail="Document implementation not complete. Wait for Phase 5 to finish."
         )
 
-    # Idris2 spec 파일 확인
-    spec_file = Path(state.spec_file) if state.spec_file else Path(f"./Domains/{project_name}.idr")
-    if not spec_file.exists():
+    # Pipeline 파일 확인
+    pipeline_file = Path(f"./Pipeline/{project_name}.idr")
+    if not pipeline_file.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Specification file not found: {spec_file}"
+            detail=f"Pipeline file not found: {pipeline_file}"
         )
 
-    output_dir = Path(f"./output")
+    output_dir = Path(f"./output/{project_name}")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # TODO: 실제 Idris2 렌더러 실행
-        # 지금은 임시로 더미 파일 생성
-        # 나중에 Main.idr을 동적으로 생성해서 실행
+        # Idris2 Pipeline 실행 (Text, CSV, Markdown)
 
         # Text 렌더러
         text_result = subprocess.run(
-            ["idris2", "--exec", "generateText", str(spec_file)],
+            ["idris2", "--exec", "exampleText", str(pipeline_file)],
             capture_output=True,
             text=True,
             timeout=30
@@ -279,7 +278,7 @@ async def generate_draft(project_name: str):
 
         # CSV 렌더러
         csv_result = subprocess.run(
-            ["idris2", "--exec", "generateCSV", str(spec_file)],
+            ["idris2", "--exec", "exampleCSV", str(pipeline_file)],
             capture_output=True,
             text=True,
             timeout=30
@@ -287,23 +286,26 @@ async def generate_draft(project_name: str):
 
         # Markdown 렌더러
         md_result = subprocess.run(
-            ["idris2", "--exec", "generateMarkdown", str(spec_file)],
+            ["idris2", "--exec", "exampleMarkdown", str(pipeline_file)],
             capture_output=True,
             text=True,
             timeout=30
         )
 
-        # 결과를 WorkflowState에 저장
+        # 결과 파일 저장
         text_file = output_dir / f"{project_name}_draft.txt"
         csv_file = output_dir / f"{project_name}_schedule.csv"
         md_file = output_dir / f"{project_name}_draft.md"
 
-        if text_file.exists():
-            state.draft_text = text_file.read_text()
-        if csv_file.exists():
-            state.draft_csv = csv_file.read_text()
-        if md_file.exists():
-            state.draft_markdown = md_file.read_text()
+        if text_result.returncode == 0:
+            text_file.write_text(text_result.stdout, encoding='utf-8')
+            state.draft_text = text_result.stdout
+        if csv_result.returncode == 0:
+            csv_file.write_text(csv_result.stdout, encoding='utf-8')
+            state.draft_csv = csv_result.stdout
+        if md_result.returncode == 0:
+            md_file.write_text(md_result.stdout, encoding='utf-8')
+            state.draft_markdown = md_result.stdout
 
         # Phase 업데이트: DocImpl → Draft
         state.current_phase = Phase.DRAFT
@@ -331,7 +333,7 @@ async def get_draft(project_name: str) -> DraftResponse:
     """
     Retrieve generated draft contents
     """
-    output_dir = Path(f"./output")
+    output_dir = Path(f"./output/{project_name}")
 
     text_file = output_dir / f"{project_name}_draft.txt"
     md_file = output_dir / f"{project_name}_draft.md"
@@ -339,9 +341,9 @@ async def get_draft(project_name: str) -> DraftResponse:
 
     return DraftResponse(
         project_name=project_name,
-        text_content=text_file.read_text() if text_file.exists() else None,
-        markdown_content=md_file.read_text() if md_file.exists() else None,
-        csv_content=csv_file.read_text() if csv_file.exists() else None
+        text_content=text_file.read_text(encoding='utf-8') if text_file.exists() else None,
+        markdown_content=md_file.read_text(encoding='utf-8') if md_file.exists() else None,
+        csv_content=csv_file.read_text(encoding='utf-8') if csv_file.exists() else None
     )
 
 @app.post("/api/project/{project_name}/feedback")
