@@ -246,8 +246,8 @@ data TotalBudget : Type where
   MkTotal : (tot : Nat) -> (gov : Nat) -> (self : Nat) -> (pf : tot = gov + self) -> TotalBudget
 
 public export
-mkTotal : (t : Nat) -> (g : Nat) -> (s : Nat) -> {auto prf : t = g + s} -> TotalBudget
-mkTotal t g s {prf} = MkTotal t g s prf
+mkTotal : (t : Nat) -> (g : Nat) -> (s : Nat) -> {{auto prf : t = g + s}} -> TotalBudget
+mkTotal t g s {{prf}} = MkTotal t g s prf
 ```
 
 ## 참고 예제
@@ -487,7 +487,7 @@ Documentable {{MainDomainType}} where
     let
       -- 헤더
       header =
-        [ Heading 1 "{문서 제목}"
+        [ Heading 1 "{{문서 제목}}"
         , VSpace 5
         , Para ("번호: " ++ obj.documentNumber)
         , Para ("날짜: " ++ obj.date)
@@ -506,10 +506,10 @@ Documentable {{MainDomainType}} where
 
       -- 메타데이터
       metadata = MkMetadata
-        "{문서 제목}"
-        "{작성자}"
-        "{날짜}"
-        "{문서 번호}"
+        "{{문서 제목}}"
+        "{{작성자}}"
+        "{{날짜}}"
+        "{{문서 번호}}"
 
     in MkDoc metadata fullBody
 ```

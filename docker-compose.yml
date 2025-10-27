@@ -14,6 +14,7 @@ services:
       - ./idris2:/app/idris2
       - ./docs:/app/docs
       - ./projects:/app/projects
+      - ./output:/app/output
       - ./scripts:/app/scripts
       - ./mcp-servers:/app/mcp-servers
     env_file:

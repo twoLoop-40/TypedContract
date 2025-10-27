@@ -1,61 +1,8 @@
-# Backend Dockerfile: FastAPI + Idris2 + LaTeX
-# Ubuntu base for better compatibility
+# Backend Dockerfile: FastAPI application
+# Uses pre-built Idris2 base image for fast rebuilds
 
-FROM ubuntu:22.04
-
-# Prevent interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install system dependencies (Python + LaTeX + Build tools)
-RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3-pip \
-    wget \
-    curl \
-    git \
-    build-essential \
-    libgmp-dev \
-    uuid-dev \
-    libncurses-dev \
-    libx11-dev \
-    texlive-xetex \
-    texlive-latex-extra \
-    texlive-fonts-recommended \
-    texlive-lang-korean \
-    fonts-nanum \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create symlinks for python
-RUN ln -sf /usr/bin/python3.11 /usr/bin/python && \
-    ln -sf /usr/bin/python3.11 /usr/bin/python3
-
-# Install Chez Scheme from source
-WORKDIR /tmp
-RUN wget https://github.com/cisco/ChezScheme/releases/download/v10.0.0/csv10.0.0.tar.gz && \
-    tar -xzf csv10.0.0.tar.gz && \
-    cd csv10.0.0 && \
-    ./configure --threads && \
-    make && \
-    make install && \
-    cd / && \
-    rm -rf /tmp/csv10.0.0 /tmp/csv10.0.0.tar.gz
-
-# Verify Chez Scheme
-RUN scheme --version
-
-# Install Idris2 from source with Chez backend
-WORKDIR /tmp
-RUN wget https://github.com/idris-lang/Idris2/archive/refs/tags/v0.7.0.tar.gz && \
-    tar -xzf v0.7.0.tar.gz && \
-    cd Idris2-0.7.0 && \
-    make bootstrap SCHEME=scheme && \
-    make install PREFIX=/usr/local && \
-    cd / && \
-    rm -rf /tmp/Idris2-0.7.0 /tmp/v0.7.0.tar.gz
-
-# Add Idris2 to PATH and verify
-ENV PATH="/root/.idris2/bin:${PATH}"
-RUN idris2 --version || (find /root/.idris2 -name idris2 && /root/.idris2/bin/idris2 --version)
+# Use the pre-built Idris2 base image
+FROM typedcontract-idris2-base:latest
 
 # Set working directory
 WORKDIR /app
@@ -69,8 +16,8 @@ RUN pip install --no-cache-dir -r /app/backend/agent/requirements.txt
 # Copy project files
 COPY . /app
 
-# Create projects directory
-RUN mkdir -p /app/projects
+# Create necessary directories
+RUN mkdir -p /app/projects /app/output
 
 # Set PYTHONPATH for module imports
 ENV PYTHONPATH=/app

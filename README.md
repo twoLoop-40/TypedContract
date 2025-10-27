@@ -48,8 +48,22 @@ cp .env.example .env
 
 ### 2. Docker로 실행
 
+#### 최초 1회: Idris2 베이스 이미지 빌드 (5-10분)
+
 ```bash
-# 백엔드 빌드 및 실행 (최초 5-10분 소요 - Idris2 빌드)
+# Idris2 베이스 이미지 빌드 (최초 1회만 실행)
+./scripts/build-idris2-base.sh
+
+# 또는 직접 빌드
+docker build -f docker/Dockerfile.idris2-base -t typedcontract-idris2-base:latest .
+```
+
+이 단계는 **최초 1회만 실행**하면 됩니다. 이후 백엔드 코드 수정 시에는 재빌드할 필요가 없습니다.
+
+#### 백엔드 실행 (30초)
+
+```bash
+# 백엔드 빌드 및 실행 (30초 소요)
 docker-compose up -d backend
 
 # 로그 확인
@@ -58,6 +72,8 @@ docker-compose logs -f backend
 # 서버 확인 (http://localhost:8000)
 curl http://localhost:8000/health
 ```
+
+**성능 개선**: 백엔드를 수정하고 재빌드할 때마다 Idris2를 다시 빌드하지 않으므로 **10분 → 30초**로 단축됩니다.
 
 ### 3. 프로젝트 생성 및 실행
 
@@ -264,13 +280,25 @@ idris2://guidelines/modules
 ### Docker 빌드 느림 (5-10분)
 
 - **원인**: Idris2를 매번 새로 빌드
-- **해결**: 추후 Idris2 base image 제공 예정
+- **해결**: ✅ **해결됨!** 2단계 Docker 구조 사용
+  1. 최초 1회: `./scripts/build-idris2-base.sh` (5-10분)
+  2. 이후: `docker-compose up -d backend` (30초)
+
+### 베이스 이미지가 없다는 에러
+
+```bash
+# Error: pull access denied for typedcontract-idris2-base
+
+# 해결: 베이스 이미지를 먼저 빌드
+./scripts/build-idris2-base.sh
+```
 
 ### "No module named 'agent'" 에러
 
 ```bash
-# Docker 컨테이너 재시작
-docker-compose restart backend
+# Docker 컨테이너 완전 재시작 (Python 캐시 클리어)
+docker-compose down
+docker-compose up -d backend
 
 # 변경사항 확인
 docker-compose logs backend --tail 50

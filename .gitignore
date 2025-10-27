@@ -39,16 +39,26 @@ frontend/out/
 frontend/.env*.local
 
 # Backend (Python)
-agent/__pycache__/
-agent/.pytest_cache/
-agent/.coverage
-agent/htmlcov/
-agent/*.pyc
-agent/*.pyo
-agent/*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
 .Python
 *.so
 *.egg
 *.egg-info/
 dist/
 build/
+.pytest_cache/
+.coverage
+htmlcov/
+agent/__pycache__/
+agent/.pytest_cache/
+agent/.coverage
+agent/htmlcov/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/

@@ -587,7 +587,7 @@ async def resume_project(
             current_state.add_log("🔄 프로젝트 재개")
 
             # Run workflow from current phase
-            from agent.agent import run_workflow
+            from backend.agent.agent import run_workflow
             updated_state = run_workflow(current_state)
 
             updated_state.mark_inactive()
