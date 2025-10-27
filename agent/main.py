@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 
 # Workflow state management (Spec/WorkflowTypes.idr의 Python 구현)
-from workflow_state import (
+from agent.workflow_state import (
     WorkflowState,
     Phase,
     CompileResult,
@@ -22,7 +22,7 @@ from workflow_state import (
 )
 
 # LangGraph agent
-from agent import run_workflow
+from agent.agent import run_workflow
 
 app = FastAPI(
     title="TypedContract API",

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # .env 파일 로드
 load_dotenv()
 
-from prompts import (
+from agent.prompts import (
     ANALYZE_DOCUMENT_PROMPT,
     GENERATE_IDRIS_PROMPT,
     FIX_ERROR_PROMPT,
@@ -24,7 +24,7 @@ from prompts import (
     GENERATE_PIPELINE_PROMPT
 )
 
-from error_classifier import (
+from agent.error_classifier import (
     classify_error,
     decide_strategy,
     ErrorLevel,
@@ -103,13 +103,18 @@ def call_claude(system_prompt: str, user_message: str = "", temperature: float =
         system_prompt = ""
 
     # API 호출
-    response = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=8192,
-        temperature=temperature,
-        system=system_prompt if system_prompt else None,
-        messages=messages
-    )
+    api_params = {
+        "model": "claude-sonnet-4-5-20250929",
+        "max_tokens": 8192,
+        "temperature": temperature,
+        "messages": messages
+    }
+
+    # system은 비어있지 않을 때만 추가
+    if system_prompt:
+        api_params["system"] = system_prompt
+
+    response = client.messages.create(**api_params)
 
     return response.content[0].text
 
@@ -296,7 +301,12 @@ def typecheck_code(state: AgentState) -> AgentState:
         state["messages"].append(f"❌ 타입 체크 실패:\n{output}")
 
         # 에러 분류 (Phase 4b)
+        print(f"\n🔍 Classifying error...")
         classified = classify_error(output)
+        print(f"   ├─ Level: {classified.level.value}")
+        print(f"   ├─ Auto-fixable: {classified.auto_fixable}")
+        print(f"   └─ Message: {classified.message[:100]}...")
+
         state["classified_error"] = {
             "level": classified.level.value,
             "message": classified.message,
@@ -309,6 +319,7 @@ def typecheck_code(state: AgentState) -> AgentState:
         # 전략 결정
         strategy = decide_strategy(DEFAULT_RETRY_POLICY, classified, state["compile_attempts"])
         state["error_strategy"] = strategy.value
+        print(f"   └─ Strategy decided: {strategy.value}")
 
         # 사용자 친화적 메시지
         user_msg = format_user_message(classified)
@@ -320,7 +331,9 @@ def typecheck_code(state: AgentState) -> AgentState:
 
 def fix_compilation_error(state: AgentState) -> AgentState:
     """Node 4: 에러 수정"""
-    print(f"\n🔧 [4/5] Fixing compilation error...")
+    print(f"\n🔧 [4/5] Fixing compilation error (attempt {state['compile_attempts']})...")
+    print(f"   ├─ Error type: {state.get('classified_error', {}).get('level', 'unknown')}")
+    print(f"   └─ Calling Claude to fix code...")
 
     prompt = FIX_ERROR_PROMPT.format(
         idris_code=state["idris_code"],
@@ -329,14 +342,17 @@ def fix_compilation_error(state: AgentState) -> AgentState:
 
     # Claude Sonnet 4.5 호출
     fixed_code = call_claude(system_prompt=prompt).strip()
+    print(f"   └─ Received fixed code ({len(fixed_code)} chars)")
 
     # 코드 블록 제거
     if fixed_code.startswith("```"):
         lines = fixed_code.split("\n")
         fixed_code = "\n".join(lines[1:-1])
+        print(f"   └─ Removed code block markers")
 
     state["idris_code"] = fixed_code
     state["messages"].append(f"🔧 코드 수정 완료 (attempt {state['compile_attempts']})")
+    print(f"   ✅ Code updated, will retry type checking...")
 
     return state
 
@@ -535,40 +551,55 @@ def reanalyze_document(state: AgentState) -> AgentState:
 
 def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error", "ask_user", "reanalyze"]:
     """타입 체크 후 다음 행동 결정 (에러 분류 기반)"""
+    print(f"\n🔀 Deciding next action...")
+    print(f"   ├─ Compile success: {state['compile_success']}")
+    print(f"   ├─ Compile attempts: {state['compile_attempts']}")
+
     if state["compile_success"]:
+        print(f"   └─ Decision: finish (success!)")
         return "finish"
 
     # 에러 전략에 따라 분기
     strategy = state.get("error_strategy")
+    print(f"   ├─ Error strategy: {strategy}")
 
     if strategy == "auto_fix":
         # 문법 에러 - 자동 수정 시도 (최대 5회)
         if state["compile_attempts"] < 5:
+            print(f"   └─ Decision: fix_error (attempt {state['compile_attempts'] + 1}/5)")
             return "fix_error"
         else:
+            print(f"   └─ Decision: fail (max retries reached)")
             return "fail"
 
     elif strategy == "ask_user":
         # 증명 실패 또는 알 수 없는 에러 - 사용자에게 물어봄
+        print(f"   └─ Decision: ask_user")
         return "ask_user"
 
     elif strategy == "fallback":
         # 증명 제거 후 계속 진행
         # TODO: 증명 제거 로직 구현
+        print(f"   └─ Decision: finish (fallback)")
         return "finish"
 
     elif strategy == "reanalyze":
         # 도메인 에러 - 재분석 필요
+        print(f"   └─ Decision: reanalyze")
         return "reanalyze"
 
     elif strategy == "terminate":
         # 중단
+        print(f"   └─ Decision: fail (terminate)")
         return "fail"
 
     else:
         # 기본값: 에러 전략이 없으면 기존 로직 사용
+        print(f"   ├─ No strategy set, using default logic")
         if state["compile_attempts"] >= 5:
+            print(f"   └─ Decision: fail (max retries)")
             return "fail"
+        print(f"   └─ Decision: fix_error (default)")
         return "fix_error"
 
 
@@ -719,7 +750,7 @@ def run_workflow(workflow_state):
     }
 
     # Phase에 따라 시작점 결정
-    from workflow_state import Phase, CompileResult
+    from agent.workflow_state import Phase, CompileResult
 
     # Phase 2: Analysis부터 시작 (Phase 1은 이미 완료)
     if workflow_state.current_phase == Phase.INPUT:
