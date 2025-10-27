@@ -87,27 +87,40 @@ def normalize_error_message(error_msg: str) -> str:
     """
     에러 메시지를 정규화하여 동일 에러 판별용으로 변환
 
-    라인 번호, 파일 경로 등을 제거하고 핵심 에러 메시지만 추출
+    라인 번호는 유지하고, 컬럼 번호만 제거 (다른 라인 = 진전 있음)
 
     Examples:
         "Domains/Foo.idr:38:20--38:21\\nError: Couldn't parse"
-        → "Error: Couldn't parse"
+        → "Foo.idr:38 Error: Couldn't parse"
+
+        "Domains/Foo.idr:40:5\\nError: Couldn't parse"
+        → "Foo.idr:40 Error: Couldn't parse"  # 다른 라인 = 다른 에러!
     """
     import re
 
-    # 파일 경로와 라인 번호 제거 (예: "Domains/Foo.idr:38:20--38:21")
-    normalized = re.sub(r'[\w/]+\.idr:\d+:\d+(?:--\d+:\d+)?', '', error_msg)
+    # 파일명:라인번호는 유지, 컬럼 번호만 제거
+    # "Domains/Foo.idr:38:20--38:21" → "Foo.idr:38"
+    def simplify_location(match):
+        path = match.group(0)
+        # 파일명 추출
+        filename = path.split('/')[-1].split(':')[0]
+        # 라인 번호 추출 (첫 번째 라인만)
+        line_match = re.search(r':(\d+):', path)
+        if line_match:
+            return f"{filename}:{line_match.group(1)}"
+        return filename
+
+    normalized = re.sub(
+        r'[\w/]+\.idr:\d+:\d+(?:--\d+:\d+)?',
+        simplify_location,
+        error_msg
+    )
 
     # 연속된 공백/줄바꿈을 하나로
     normalized = re.sub(r'\s+', ' ', normalized)
 
-    # "Error:" 이후의 핵심 메시지만 추출
-    match = re.search(r'Error:\s*(.+?)(?:\s*\d+/\d+:|$)', normalized)
-    if match:
-        return "Error: " + match.group(1).strip()
-
-    # 또는 전체 메시지의 첫 100자 (정규화된 버전)
-    return normalized.strip()[:100]
+    # 첫 150자 반환 (파일명:라인 + 에러 메시지)
+    return normalized.strip()[:150]
 
 
 def call_claude(system_prompt: str, user_message: str = "", temperature: float = 0.0) -> str:
