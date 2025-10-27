@@ -6,6 +6,7 @@ build/
 
 # Generated files
 output/
+direction/
 *.tex
 *.pdf
 *.aux
