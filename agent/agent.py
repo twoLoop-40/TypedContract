@@ -831,7 +831,7 @@ def run_workflow(workflow_state):
         "compile_attempts": workflow_state.compile_attempts,
         "last_error": workflow_state.compile_result.error_msg if workflow_state.compile_result else None,
         "compile_success": workflow_state.compilation_phase_complete(),
-        "error_history": [],  # 에러 히스토리 초기화
+        "error_history": workflow_state.error_history,  # 기존 에러 히스토리 유지
         "classified_error": workflow_state.classified_error,
         "error_strategy": workflow_state.error_strategy,
         "user_action": None,
@@ -855,6 +855,7 @@ def run_workflow(workflow_state):
     workflow_state.spec_code = result.get("idris_code")
     workflow_state.spec_file = result.get("final_module_path")
     workflow_state.compile_attempts = result.get("compile_attempts", 0)
+    workflow_state.error_history = result.get("error_history", [])  # 에러 히스토리 저장
 
     if result["compile_success"]:
         workflow_state.compile_result = CompileResult(success=True)

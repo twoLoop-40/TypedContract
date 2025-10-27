@@ -107,6 +107,7 @@ class WorkflowState:
     classified_error: Optional[dict] = None  # ClassifiedError (JSON)
     error_strategy: Optional[str] = None     # ErrorStrategy
     user_action: Optional[str] = None        # 사용자 선택한 액션
+    error_history: List[str] = field(default_factory=list)  # 최근 에러 메시지 추적
 
     # Phase 5: 문서 구현
     documentable_impl: Optional[str] = None
