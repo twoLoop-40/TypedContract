@@ -133,6 +133,37 @@ def save_state_to_file(state: AgentState) -> None:
         print(f"   ⚠️ Failed to save state: {e}")
 
 
+def load_idris2_guidelines() -> dict:
+    """
+    Load Idris2 guidelines for prompt caching
+
+    Loads from docs/IDRIS2_CODE_GENERATION_GUIDELINES.md (used by MCP server)
+
+    Returns:
+        dict with 'text' and 'cache_control' for Anthropic API, or None if not found
+    """
+    # Idris2 코드 생성 가이드라인 경로 (MCP 서버와 동일)
+    project_root = Path(__file__).parent.parent.parent
+    guidelines_path = project_root / "docs" / "IDRIS2_CODE_GENERATION_GUIDELINES.md"
+
+    if not guidelines_path.exists():
+        print(f"⚠️ Idris2 guidelines not found at {guidelines_path}")
+        return None
+
+    try:
+        content = guidelines_path.read_text(encoding='utf-8')
+
+        # Anthropic prompt caching format
+        return {
+            "type": "text",
+            "text": content,
+            "cache_control": {"type": "ephemeral"}  # 5분간 캐시
+        }
+    except Exception as e:
+        print(f"⚠️ Failed to load guidelines: {e}")
+        return None
+
+
 # ============================================================================
 # Tools
 # ============================================================================
@@ -190,7 +221,7 @@ def normalize_error_message(error_msg: str) -> str:
     return normalized.strip()[:150]
 
 
-def call_claude(system_prompt: str, user_message: str = "", temperature: float = 0.0) -> str:
+def call_claude(system_prompt: str, user_message: str = "", temperature: float = 0.0, use_cached_guidelines: bool = True) -> str:
     """
     Claude Sonnet 4.5 API 호출 헬퍼 함수
 
@@ -198,6 +229,7 @@ def call_claude(system_prompt: str, user_message: str = "", temperature: float =
         system_prompt: 시스템 프롬프트
         user_message: 사용자 메시지 (선택)
         temperature: 생성 온도 (0.0 = deterministic)
+        use_cached_guidelines: Idris2 가이드라인 캐싱 사용 여부 (기본값: True)
 
     Returns:
         LLM 응답 텍스트
@@ -231,9 +263,25 @@ def call_claude(system_prompt: str, user_message: str = "", temperature: float =
         "messages": messages
     }
 
-    # system은 비어있지 않을 때만 추가
+    # system prompt 구성 (캐싱된 가이드라인 포함)
     if system_prompt:
-        api_params["system"] = system_prompt
+        # use_cached_guidelines가 True이고 가이드라인이 있으면 캐싱 적용
+        if use_cached_guidelines:
+            guidelines = load_idris2_guidelines()
+            if guidelines:
+                # system은 list of content blocks 형태로 전달
+                api_params["system"] = [
+                    guidelines,  # 캐싱된 가이드라인 (ephemeral cache)
+                    {
+                        "type": "text",
+                        "text": system_prompt
+                    }
+                ]
+            else:
+                # 가이드라인 로드 실패 시 기본 system prompt만 사용
+                api_params["system"] = system_prompt
+        else:
+            api_params["system"] = system_prompt
 
     response = client.messages.create(**api_params)
 
