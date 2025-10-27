@@ -20,11 +20,11 @@ VATRate = 0.10
 
 public export
 data BudgetAmount : Type where
-  MkBudgetAmount : (supply : Nat) ->
-                   (vat : Nat) ->
-                   (total : Nat) ->
-                   (0 validTotal : total = supply + vat) ->
-                   BudgetAmount
+  MkBudgetAmount : (supply : Nat)
+    -> (vat : Nat)
+    -> (total : Nat)
+    -> (validTotal : total = plus supply vat)
+    -> BudgetAmount
 
 public export
 mkBudgetAmount : (supply : Nat) -> (vat : Nat) -> BudgetAmount
@@ -32,11 +32,11 @@ mkBudgetAmount s v = MkBudgetAmount s v (s + v) Refl
 
 public export
 data ItemCost : Type where
-  MkItemCost : (unitPrice : Nat) ->
-               (quantity : Nat) ->
-               (totalCost : Nat) ->
-               (0 validCost : totalCost = unitPrice * quantity) ->
-               ItemCost
+  MkItemCost : (unitPrice : Nat)
+    -> (quantity : Nat)
+    -> (totalCost : Nat)
+    -> (validCost : totalCost = unitPrice * quantity)
+    -> ItemCost
 
 public export
 mkItemCost : (unitPrice : Nat) -> (quantity : Nat) -> ItemCost

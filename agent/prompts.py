@@ -196,7 +196,7 @@ data ContractAmount : Type where
   MkAmount : (supply : Nat)
     -> (vat : Nat)
     -> (total : Nat)
-    -> (proof : total = supply + vat)
+    -> (pf : total = plus supply vat)
     -> ContractAmount
 
 -- 나쁜 예: 검증 함수만 (컴파일 타임에 증명 안됨)
@@ -206,7 +206,7 @@ record ContractAmount where
   total : Nat
 
 validAmount : ContractAmount -> Bool
-validAmount a = a.total == a.supply + a.vat
+validAmount a = a.total == plus a.supply a.vat
 ```
 
 **완전하고 타입 체크 가능한 Idris2 코드를 생성하세요.**
