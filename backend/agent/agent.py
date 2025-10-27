@@ -1041,7 +1041,7 @@ def run_workflow(workflow_state):
     }
 
     # Phase에 따라 시작점 결정
-    from agent.workflow_state import Phase, CompileResult
+    from backend.agent.workflow_state import Phase, CompileResult
 
     # Phase 2: Analysis부터 시작 (Phase 1은 이미 완료)
     if workflow_state.current_phase == Phase.INPUT:
