@@ -1,12 +1,11 @@
 'use client'
 
-import { use, useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { getStatus, getDraft, submitFeedback, generateDraft, finalizePDF, downloadPDF } from '@/lib/api'
 import type { WorkflowStatus, DraftResponse } from '@/types/workflow'
 
-export default function ProjectPage({ params }: { params: Promise<{ name: string }> }) {
-  const resolvedParams = use(params)
-  const projectName = resolvedParams.name
+export default function ProjectPage({ params }: { params: { name: string } }) {
+  const projectName = params.name
 
   const [status, setStatus] = useState<WorkflowStatus | null>(null)
   const [draft, setDraft] = useState<DraftResponse | null>(null)
@@ -118,21 +117,93 @@ export default function ProjectPage({ params }: { params: Promise<{ name: string
         <h2 className="text-xl font-semibold mb-4">진행 상황</h2>
         <div className="mb-4">
           <div className="flex justify-between text-sm mb-2">
-            <span className="font-medium">{status.current_phase}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-medium">{status.current_phase}</span>
+              {/* Compilation retry indicator */}
+              {status.current_phase.includes('Compilation') && status.error && (
+                <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded">
+                  🔄 자동 수정 시도 중...
+                </span>
+              )}
+              {/* Error handling indicator */}
+              {status.current_phase.includes('ErrorHandling') && (
+                <span className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded">
+                  🔍 에러 분석 중...
+                </span>
+              )}
+            </div>
             <span className="text-gray-600">{(status.progress * 100).toFixed(0)}%</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
             <div
-              className="bg-primary h-3 rounded-full transition-all duration-500"
+              className={`h-3 rounded-full transition-all duration-500 ${
+                status.error ? 'bg-yellow-500' : 'bg-primary'
+              }`}
               style={{ width: `${status.progress * 100}%` }}
             />
           </div>
         </div>
 
         {status.error && (
-          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded text-red-800 text-sm">
-            <strong>컴파일 오류:</strong><br />
-            <pre className="mt-2 text-xs overflow-x-auto">{status.error}</pre>
+          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded">
+            <div className="flex items-start gap-2 mb-2">
+              <span className="text-red-600 text-xl">⚠️</span>
+              <div className="flex-1">
+                <strong className="text-red-800 text-base">Idris2 타입 체크 오류</strong>
+                <p className="text-sm text-red-600 mt-1">
+                  의존 타입 검증 중 오류가 발생했습니다. 에이전트가 자동으로 수정을 시도합니다.
+                </p>
+
+                {/* Error Classification Info */}
+                {status.classified_error && (
+                  <div className="mt-3 p-3 bg-white rounded border border-red-300">
+                    <div className="text-sm space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-700">에러 레벨:</span>
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          status.classified_error.level === 'AutoFixable' ? 'bg-yellow-200 text-yellow-800' :
+                          status.classified_error.level === 'LogicError' ? 'bg-orange-200 text-orange-800' :
+                          'bg-red-200 text-red-800'
+                        }`}>
+                          {status.classified_error.level === 'AutoFixable' ? '🔧 자동 수정 가능' :
+                           status.classified_error.level === 'LogicError' ? '⚠️ 논리 에러' :
+                           '🚫 도메인 모델 에러'}
+                        </span>
+                      </div>
+                      {status.error_strategy && (
+                        <div>
+                          <span className="font-semibold text-gray-700">처리 전략:</span>{' '}
+                          <span className="text-gray-900">{status.error_strategy}</span>
+                        </div>
+                      )}
+                      {status.classified_error.level === 'AutoFixable' && (
+                        <div className="text-xs text-gray-600 bg-yellow-50 p-2 rounded">
+                          💡 Claude가 자동으로 코드를 수정하고 있습니다. 최대 5회 재시도합니다.
+                        </div>
+                      )}
+                      {status.classified_error.level === 'LogicError' && (
+                        <div className="text-xs text-gray-600 bg-orange-50 p-2 rounded">
+                          💡 데이터 검증이 필요할 수 있습니다. 입력값을 확인해주세요.
+                        </div>
+                      )}
+                      {status.classified_error.level === 'DomainModelError' && (
+                        <div className="text-xs text-gray-600 bg-red-50 p-2 rounded">
+                          💡 요구사항을 다시 분석해야 할 수 있습니다. 프롬프트를 수정하거나 참조 문서를 추가해보세요.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm text-red-700 font-medium hover:text-red-900">
+                📋 상세 오류 메시지 보기
+              </summary>
+              <pre className="mt-2 text-xs text-red-800 bg-red-100 p-3 rounded overflow-x-auto border border-red-300">
+{status.error}
+              </pre>
+            </details>
           </div>
         )}
       </div>

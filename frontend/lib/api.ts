@@ -25,6 +25,15 @@ const api = axios.create({
 // Project Management
 // ============================================================================
 
+export async function getAllProjects() {
+  // TODO: 백엔드에 GET /api/projects 엔드포인트 구현 필요
+  // const response = await api.get('/api/projects')
+  // return response.data
+
+  // 임시: 빈 배열 반환
+  return []
+}
+
 export async function createProject(data: ProjectInitRequest) {
   const response = await api.post('/api/project/init', data)
   return response.data

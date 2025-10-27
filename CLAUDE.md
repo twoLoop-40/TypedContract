@@ -35,13 +35,24 @@ TypedContract/
 │   ├── AgentOperations.idr    # Agent system operations
 │   ├── RendererOperations.idr # Multi-format rendering operations
 │   ├── FrontendTypes.idr      # UI state and view types
+│   ├── ErrorHandling.idr      # Error classification system
 │   └── *Example.idr           # Example workflows & usage
+│
+├── Pipeline/                   # Generated runtime pipelines (agent-created)
+│   └── [project_name].idr     # Project-specific document generation pipeline
 │
 ├── agent/                      # Python FastAPI backend
 │   ├── main.py                # FastAPI application
 │   ├── agent.py               # LangGraph agent system
 │   ├── prompts.py             # Agent prompts
-│   └── requirements.txt       # Python dependencies
+│   ├── workflow_state.py      # Python implementation of Spec/WorkflowTypes.idr
+│   ├── error_classifier.py    # Error classification and strategy system
+│   ├── requirements.txt       # Python dependencies
+│   └── tests/                 # Python unit tests
+│       ├── test_workflow_state.py
+│       ├── test_api_endpoints.py
+│       ├── test_agent_phase*.py
+│       └── conftest.py
 │
 ├── frontend/                   # Next.js 14 frontend (TODO)
 │   ├── package.json
@@ -125,26 +136,29 @@ make install PREFIX=/usr/local
 
 #### 2. Install Python Dependencies
 
-**Recommended: Use uv (faster)**
-```bash
-cd agent/
+**⚠️ IMPORTANT: Use `uv` for fast, reliable Python dependency management**
 
+```bash
 # Install uv if not already installed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install dependencies
-uv pip install --system -r requirements.txt
-```
-
-**Alternative: Use pip**
-```bash
+# Install all dependencies with uv (RECOMMENDED)
 cd agent/
-pip install -r requirements.txt
+uv pip install --system -r requirements.txt
+
+# Verify installation
+python -c "import anthropic, fastapi, langgraph; print('✅ Dependencies installed')"
 ```
 
-**Note**: Some packages (like pandas) may require compilation. If build errors occur, you can skip non-essential packages and install only core dependencies:
+**Why uv?**
+- 10-100x faster than pip
+- Better dependency resolution
+- Handles compiled packages (pandas, etc.) more reliably
+
+**Troubleshooting:**
+If you encounter build errors with optional packages (pandas, openpyxl), you can install only core dependencies:
 ```bash
-# Core packages only
+# Core packages only (minimal installation)
 uv pip install --system anthropic fastapi uvicorn langgraph langchain python-dotenv pydantic
 ```
 
@@ -176,10 +190,19 @@ python -c "from dotenv import load_dotenv; import os; load_dotenv(); print('✅ 
 
 ```bash
 cd agent/
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn agent.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Access API docs at: http://localhost:8000/docs
+
+**Quick verification:**
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Check Idris2 integration
+curl http://localhost:8000/api/debug/idris2
+```
 
 ---
 
@@ -243,17 +266,17 @@ idris2 --check Main.idr
 ### Backend Development
 
 ```bash
-# Inside backend container
+# Run all tests
 cd agent/
-pytest tests/                    # Run Python tests
-pytest tests/ -v                 # Verbose output
-pytest tests/test_workflow.py   # Run specific test file
-python -m agent.main            # Run FastAPI directly (optional)
+pytest tests/                          # Run all tests
+pytest tests/ -v                       # Verbose output
+pytest tests/test_workflow_state.py   # Run specific test file
+pytest tests/test_workflow_state.py::test_initial_state -v  # Run specific test
+pytest tests/ --cov=. --cov-report=term-missing  # With coverage
 
-# Outside container (requires Python + dependencies)
+# Run FastAPI server
 cd agent/
-pip install -r requirements.txt
-uvicorn agent.main:app --reload
+uvicorn agent.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **IMPORTANT: Testing Strategy**
@@ -268,10 +291,14 @@ Python is a runtime language without compile-time type checking like Idris2. The
 Test structure:
 ```
 agent/tests/
-├── test_workflow_state.py    # WorkflowState logic tests
+├── test_workflow_state.py    # WorkflowState logic tests (17 tests)
 ├── test_api_endpoints.py     # FastAPI endpoint tests
-├── test_agent.py              # LangGraph agent tests
+├── test_agent_phase5.py      # Phase 5: Documentable implementation
+├── test_agent_phase6.py      # Phase 6: Draft generation
+├── test_agent_phase78.py     # Phase 7-8: Feedback loop
 └── conftest.py                # Pytest fixtures
+
+Current test coverage: 17 unit tests passing ✅
 ```
 
 ### Frontend Development
@@ -354,12 +381,17 @@ Python backend that orchestrates the full system.
 - `main.py`: FastAPI REST API (project init, status, feedback, downloads)
 - `agent.py`: LangGraph agent system that generates Idris2 code based on user prompts
 - `prompts.py`: Agent prompts for code generation
+- `workflow_state.py`: Python implementation of Spec/WorkflowTypes.idr
+- `error_classifier.py`: Intelligent error handling system (classify → decide strategy → retry/user input)
 
 **API Endpoints:**
 - `POST /api/project/init`: Initialize new project
-- `GET /api/project/{name}/status`: Get generation status
-- `POST /api/project/{name}/feedback`: Submit user feedback
-- `GET /api/project/{name}/draft`: Get draft outputs (txt/md/csv)
+- `POST /api/project/{name}/generate`: Start LangGraph workflow (Phases 2-5)
+- `GET /api/project/{name}/status`: Get generation status (with error classification)
+- `POST /api/project/{name}/draft`: Generate draft outputs (txt/md/csv)
+- `GET /api/project/{name}/draft`: Retrieve draft contents
+- `POST /api/project/{name}/feedback`: Submit user feedback (triggers Phase 7-8 loop)
+- `POST /api/project/{name}/finalize`: Generate final PDF
 - `GET /api/project/{name}/download`: Download final PDF
 
 ### Layer 5: Next.js Frontend (`frontend/`)
@@ -372,6 +404,48 @@ User interface for the document generation system (TODO - not yet implemented).
 - Draft preview (txt/md/csv)
 - Feedback submission for revisions
 - PDF download
+
+## Intelligent Error Handling System
+
+**Problem**: Idris2 compilation errors can be:
+1. **Syntax errors** (auto-fixable by Claude)
+2. **Type errors** (may require data corrections)
+3. **Proof failures** (indicate logical inconsistencies in input data)
+
+The system classifies errors and decides appropriate strategies automatically.
+
+### Error Classification (Spec/ErrorHandling.idr + agent/error_classifier.py)
+
+**Level 1: Auto-fixable** (Syntax/Import errors)
+- Strategy: Auto-retry with Claude fixes (max 5 attempts)
+- Examples: Missing imports, typos, undefined names
+- No user intervention needed
+
+**Level 2: Logic errors** (Type mismatches, proof failures)
+- Strategy: Request user confirmation or data correction
+- Examples: `totalPrice ≠ supplyPrice + vat` proof failure
+- User must verify input data accuracy
+
+**Level 3: Domain model errors** (Misunderstood requirements)
+- Strategy: Request detailed user clarification
+- Examples: Wrong document structure, missing fields
+- Requires re-analysis from Phase 2
+
+**Workflow Integration:**
+```
+Phase 4: Compilation
+    ↓ (if error)
+Phase 4b: Error Handling
+    ├─ Classify error (error_classifier.py)
+    ├─ Decide strategy (auto-retry vs user input)
+    ├─ Apply retry policy (max 5 syntax errors, 3 logic errors)
+    └─ Continue or request user action
+```
+
+**Key files:**
+- `Spec/ErrorHandling.idr`: Formal error classification types
+- `agent/error_classifier.py`: Python implementation
+- `agent/workflow_state.py`: Retry policy management
 
 ## Key Patterns
 
@@ -494,13 +568,78 @@ Documentable MyContract where
 1. **User input** → Frontend (Next.js)
 2. **Project init** → Backend API (`POST /api/project/init`)
 3. **Agent generates Idris2 code** → LangGraph agent creates domain model
-4. **Type checking** → `idris2 --check` validates correctness
+4. **Type checking** → `idris2 --check` validates correctness (with error classification)
 5. **Document generation** → Idris2 compiles and generates outputs
 6. **Multi-format rendering** → txt/md/csv for preview, LaTeX for PDF
-7. **User feedback** → Optional revision cycle
+7. **User feedback** → Optional revision cycle (Phase 7-8 loop)
 8. **Final output** → PDF download
 
-## Reference: Spirati Contract Example
+## Development Best Practices
+
+### Working with Idris2 + Python
+
+**Rule of thumb:**
+- **Idris2 code**: Type-safe, compile-time verification → Modify carefully
+- **Python code**: Runtime behavior → Write tests first, run tests after every change
+
+### Common Development Workflow
+
+```bash
+# 1. Type-check Idris2 changes
+idris2 --check Core/DocumentModel.idr
+
+# 2. Update Python implementation
+vim agent/workflow_state.py
+
+# 3. Write/update tests
+vim agent/tests/test_workflow_state.py
+
+# 4. Run tests
+cd agent/
+pytest tests/test_workflow_state.py -v
+
+# 5. Run server and test endpoint
+uvicorn agent.main:app --reload &
+curl http://localhost:8000/api/project/test/status
+```
+
+### Debugging Tips
+
+**Idris2 compilation fails:**
+```bash
+# Check which phase fails
+idris2 --check Domains/YourDomain.idr
+
+# Common issues:
+# - Missing import: Add "import Core.DomainToDoc"
+# - Type mismatch: Check Documentable implementation
+# - Proof failure: Verify dependent type constraints
+```
+
+**Python API errors:**
+```bash
+# Check workflow state
+cat output/[project_name]/state.json
+
+# View API logs
+docker-compose logs -f backend
+
+# Test specific endpoint
+curl -X POST http://localhost:8000/api/project/init \
+  -H "Content-Type: application/json" \
+  -d '{"project_name": "test", "user_prompt": "test", "reference_docs": []}'
+```
+
+**LangGraph agent issues:**
+```bash
+# Check ANTHROPIC_API_KEY
+python -c "import os; from dotenv import load_dotenv; load_dotenv(); print(os.getenv('ANTHROPIC_API_KEY')[:10])"
+
+# Run agent tests
+pytest agent/tests/test_agent_phase5.py -v -s
+```
+
+## Reference: ScaleDeep Contract Example
 
 The `Domains/ScaleDeep.idr` file demonstrates a complete domain model:
 - **Client**: ㈜스피라티, **Contractor**: ㈜이츠에듀

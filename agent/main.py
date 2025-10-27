@@ -22,7 +22,7 @@ from agent.workflow_state import (
 )
 
 # LangGraph agent
-from agent.agent import run_workflow
+from agent.agent import run_workflow, to_pascal_case
 
 app = FastAPI(
     title="TypedContract API",
@@ -269,8 +269,9 @@ async def generate_draft(project_name: str):
             detail="Document implementation not complete. Wait for Phase 5 to finish."
         )
 
-    # Pipeline 파일 확인
-    pipeline_file = Path(f"./Pipeline/{project_name}.idr")
+    # Pipeline 파일 확인 (PascalCase file name)
+    module_name = to_pascal_case(project_name)
+    pipeline_file = Path(f"./Pipeline/{module_name}.idr")
     if not pipeline_file.exists():
         raise HTTPException(
             status_code=404,

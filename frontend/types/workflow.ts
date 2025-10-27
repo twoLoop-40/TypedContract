@@ -14,7 +14,7 @@ export type Phase =
   | 'RefinementPhase'
   | 'FinalPhase'
 
-export type ErrorLevel = 'syntax' | 'proof' | 'domain' | 'unknown'
+export type ErrorLevel = 'AutoFixable' | 'LogicError' | 'DomainModelError' | 'unknown'
 
 export type UserAction = 'retry' | 'fallback' | 'reanalyze' | 'manual' | 'abort'
 

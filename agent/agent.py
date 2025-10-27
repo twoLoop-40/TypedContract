@@ -289,8 +289,10 @@ def generate_idris_code(state: AgentState) -> AgentState:
         idris_code = "\n".join(lines[1:-1])
 
     state["idris_code"] = idris_code
-    state["current_file"] = f"Domains/{state['project_name']}.idr"
+    # Use PascalCase for file name to match module name
+    state["current_file"] = f"Domains/{module_name}.idr"
     state["messages"].append(f"✅ Idris2 코드 생성 완료")
+    print(f"   └─ File path: {state['current_file']}")
 
     return state
 
@@ -391,8 +393,11 @@ def generate_documentable_impl(state: AgentState) -> AgentState:
         except:
             domain_code = "# Domain code not available"
 
+    # Convert to PascalCase for module name
+    module_name = to_pascal_case(state["project_name"])
+
     prompt = GENERATE_DOCUMENTABLE_PROMPT.format(
-        project_name=state["project_name"],
+        project_name=module_name,
         domain_code=domain_code
     )
 
@@ -404,8 +409,8 @@ def generate_documentable_impl(state: AgentState) -> AgentState:
         lines = documentable_code.split("\n")
         documentable_code = "\n".join(lines[1:-1])
 
-    # 파일 저장
-    documentable_file = f"DomainToDoc/{state['project_name']}.idr"
+    # 파일 저장 (PascalCase file name to match module name)
+    documentable_file = f"DomainToDoc/{module_name}.idr"
     save_msg = save_idris_file(documentable_code, documentable_file)
 
     # 타입 체크
@@ -423,8 +428,11 @@ def generate_pipeline_impl(state: AgentState) -> AgentState:
     """Node 6: Pipeline 구현 생성 (Phase 5)"""
     print("\n⚙️ [6/7] Generating pipeline implementation...")
 
+    # Convert to PascalCase for module name
+    module_name = to_pascal_case(state["project_name"])
+
     prompt = GENERATE_PIPELINE_PROMPT.format(
-        project_name=state["project_name"]
+        project_name=module_name
     )
 
     # Claude Sonnet 4.5 호출
@@ -435,8 +443,8 @@ def generate_pipeline_impl(state: AgentState) -> AgentState:
         lines = pipeline_code.split("\n")
         pipeline_code = "\n".join(lines[1:-1])
 
-    # 파일 저장
-    pipeline_file = f"Pipeline/{state['project_name']}.idr"
+    # 파일 저장 (PascalCase file name to match module name)
+    pipeline_file = f"Pipeline/{module_name}.idr"
     save_msg = save_idris_file(pipeline_code, pipeline_file)
 
     # 타입 체크
@@ -454,8 +462,9 @@ def generate_draft_outputs(state: AgentState) -> AgentState:
     """Node 7: 초안 생성 (Phase 6 - Draft Phase)"""
     print("\n📄 [7/7] Generating draft outputs (txt, csv, md)...")
 
-    project_name = state["project_name"]
-    pipeline_file = f"Pipeline/{project_name}.idr"
+    # Convert to PascalCase for file name
+    module_name = to_pascal_case(state["project_name"])
+    pipeline_file = f"Pipeline/{module_name}.idr"
 
     # 렌더러 함수들을 idris2 --exec로 실행
     outputs = {}
@@ -790,8 +799,9 @@ def run_workflow(workflow_state):
         # Phase 5 결과 반영
         # Documentable과 Pipeline 파일이 생성되었는지 확인
         from pathlib import Path
-        documentable_file = Path(f"DomainToDoc/{workflow_state.project_name}.idr")
-        pipeline_file = Path(f"Pipeline/{workflow_state.project_name}.idr")
+        module_name = to_pascal_case(workflow_state.project_name)
+        documentable_file = Path(f"DomainToDoc/{module_name}.idr")
+        pipeline_file = Path(f"Pipeline/{module_name}.idr")
 
         if documentable_file.exists():
             workflow_state.documentable_impl = documentable_file.read_text(encoding='utf-8')

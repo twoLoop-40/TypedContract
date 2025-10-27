@@ -14,6 +14,22 @@ export default function NewProject() {
   const [files, setFiles] = useState<File[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  // Validate project name (only alphanumeric and underscore)
+  const validateProjectName = (name: string): boolean => {
+    return /^[a-zA-Z0-9_]+$/.test(name)
+  }
+
+  const handleProjectNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    // Only allow valid characters
+    if (value === '' || validateProjectName(value)) {
+      setFormData({ ...formData, projectName: value })
+      setError(null)
+    } else {
+      setError('프로젝트 이름은 영문, 숫자, 언더스코어(_)만 사용 가능합니다')
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -71,13 +87,15 @@ export default function NewProject() {
             type="text"
             className="input"
             value={formData.projectName}
-            onChange={(e) => setFormData({ ...formData, projectName: e.target.value })}
-            placeholder="예: MyContract2025"
+            onChange={handleProjectNameChange}
+            placeholder="예: scale_deep_contract"
             required
             disabled={step !== 'input'}
+            pattern="[a-zA-Z0-9_]+"
+            title="영문, 숫자, 언더스코어(_)만 사용 가능합니다"
           />
           <p className="mt-1 text-sm text-gray-500">
-            영문, 숫자, 언더스코어만 사용 가능
+            ⚠️ 영문, 숫자, 언더스코어(_)만 사용 (한글 불가)
           </p>
         </div>
 
