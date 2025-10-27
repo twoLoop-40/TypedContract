@@ -16,6 +16,8 @@ services:
       - ./Domains:/app/Domains
       - ./output:/app/output
       - ./direction:/app/direction
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
       - IDRIS2_PATH=/usr/local/bin/idris2
