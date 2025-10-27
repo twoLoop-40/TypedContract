@@ -95,6 +95,11 @@ GENERATE_IDRIS_PROMPT = """당신은 Idris2 전문가입니다.
 module Domains.{project_name}
 ```
 
+**CRITICAL**: 모듈 이름은 반드시 프로젝트 이름과 정확히 일치해야 합니다.
+- 프로젝트: `problem_input_v3` → 모듈: `module Domains.problem_input_v3`
+- 프로젝트: `my_contract` → 모듈: `module Domains.my_contract`
+- ❌ PascalCase 변환 금지 (ProblemInputV3, MyContract 등)
+
 2. **Layer 1: Primitive Types**
 ```idris
 ------------------------------------------------------------
@@ -155,8 +160,8 @@ record Party where
 ------------------------------------------------------------
 
 public export
-record {DocumentName} where
-  constructor Mk{DocumentName}
+record {{DocumentName}} where
+  constructor Mk{{DocumentName}}
   -- ... 전체 문서 필드들
 ```
 
@@ -167,8 +172,8 @@ record {DocumentName} where
 ------------------------------------------------------------
 
 public export
-example{DocumentName} : {DocumentName}
-example{DocumentName} = Mk{DocumentName}
+example{{DocumentName}} : {{DocumentName}}
+example{{DocumentName}} = Mk{{DocumentName}}
   -- ... 실제 데이터
 ```
 
@@ -350,7 +355,7 @@ partyToElements role party =
 ------------------------------------------------------------
 
 public export
-Documentable {MainDomainType} where
+Documentable {{MainDomainType}} where
   toDocument obj =
     let
       -- 헤더
@@ -447,28 +452,28 @@ import Core.LaTeXRenderer
 
 -- Text 렌더링
 public export
-generateText : {MainDomainType} -> String
+generateText : {{MainDomainType}} -> String
 generateText obj =
   let doc = toDocument obj
   in renderText doc
 
 -- CSV 렌더링
 public export
-generateCSV : {MainDomainType} -> String
+generateCSV : {{MainDomainType}} -> String
 generateCSV obj =
   let doc = toDocument obj
   in renderCSV doc
 
 -- Markdown 렌더링
 public export
-generateMarkdown : {MainDomainType} -> String
+generateMarkdown : {{MainDomainType}} -> String
 generateMarkdown obj =
   let doc = toDocument obj
   in renderMarkdown doc
 
 -- LaTeX 렌더링
 public export
-generateLaTeX : {MainDomainType} -> String
+generateLaTeX : {{MainDomainType}} -> String
 generateLaTeX obj =
   let doc = toDocument obj
       latexDoc = renderDocument doc
@@ -486,19 +491,19 @@ generateLaTeX obj =
 
 public export
 exampleText : String
-exampleText = generateText example{MainDomainType}
+exampleText = generateText example{{MainDomainType}}
 
 public export
 exampleCSV : String
-exampleCSV = generateCSV example{MainDomainType}
+exampleCSV = generateCSV example{{MainDomainType}}
 
 public export
 exampleMarkdown : String
-exampleMarkdown = generateMarkdown example{MainDomainType}
+exampleMarkdown = generateMarkdown example{{MainDomainType}}
 
 public export
 exampleLaTeX : String
-exampleLaTeX = generateLaTeX example{MainDomainType}
+exampleLaTeX = generateLaTeX example{{MainDomainType}}
 ```
 
 ## 참고 예제
