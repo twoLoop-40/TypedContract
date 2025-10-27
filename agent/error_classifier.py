@@ -106,6 +106,9 @@ def is_syntax_error(message: str) -> bool:
         "Parse error",
         "Can't find import",
         "Unexpected token",
+        "Module name",  # Module name mismatch
+        "does not match file name",
+        "Couldn't parse",
     ]
     return any(pattern in message for pattern in patterns)
 
