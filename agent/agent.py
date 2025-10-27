@@ -54,6 +54,7 @@ class AgentState(TypedDict):
     compile_attempts: int
     last_error: Optional[str]
     compile_success: bool
+    error_history: List[str]  # 최근 에러 메시지 추적 (동일 에러 반복 감지)
 
     # 에러 핸들링 (Phase 4b)
     classified_error: Optional[dict]  # ClassifiedError (JSON)
@@ -80,6 +81,33 @@ def to_pascal_case(snake_str: str) -> str:
     """
     components = snake_str.split('_')
     return ''.join(word.capitalize() for word in components)
+
+
+def normalize_error_message(error_msg: str) -> str:
+    """
+    에러 메시지를 정규화하여 동일 에러 판별용으로 변환
+
+    라인 번호, 파일 경로 등을 제거하고 핵심 에러 메시지만 추출
+
+    Examples:
+        "Domains/Foo.idr:38:20--38:21\\nError: Couldn't parse"
+        → "Error: Couldn't parse"
+    """
+    import re
+
+    # 파일 경로와 라인 번호 제거 (예: "Domains/Foo.idr:38:20--38:21")
+    normalized = re.sub(r'[\w/]+\.idr:\d+:\d+(?:--\d+:\d+)?', '', error_msg)
+
+    # 연속된 공백/줄바꿈을 하나로
+    normalized = re.sub(r'\s+', ' ', normalized)
+
+    # "Error:" 이후의 핵심 메시지만 추출
+    match = re.search(r'Error:\s*(.+?)(?:\s*\d+/\d+:|$)', normalized)
+    if match:
+        return "Error: " + match.group(1).strip()
+
+    # 또는 전체 메시지의 첫 100자 (정규화된 버전)
+    return normalized.strip()[:100]
 
 
 def call_claude(system_prompt: str, user_message: str = "", temperature: float = 0.0) -> str:
@@ -317,8 +345,17 @@ def typecheck_code(state: AgentState) -> AgentState:
         state["final_module_path"] = state["current_file"]
         state["classified_error"] = None
         state["error_strategy"] = None
+        # 성공 시 에러 히스토리 초기화
+        state["error_history"] = []
     else:
         state["messages"].append(f"❌ 타입 체크 실패:\n{output}")
+
+        # 에러 히스토리에 정규화된 에러 추가
+        normalized_error = normalize_error_message(output)
+        state["error_history"].append(normalized_error)
+        # 최근 5개만 유지
+        if len(state["error_history"]) > 5:
+            state["error_history"] = state["error_history"][-5:]
 
         # 에러 분류 (Phase 4b)
         print(f"\n🔍 Classifying error...")
@@ -586,6 +623,15 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
         print(f"   └─ Decision: finish (success!)")
         return "finish"
 
+    # 동일 에러 3회 연속 체크 (조기 종료)
+    error_history = state.get("error_history", [])
+    if len(error_history) >= 3:
+        last_three = error_history[-3:]
+        if last_three[0] == last_three[1] == last_three[2]:
+            print(f"   ├─ Same error repeated 3 times: {last_three[0][:60]}...")
+            print(f"   └─ Decision: fail (identical error repeated)")
+            return "fail"
+
     # 에러 전략에 따라 분기
     strategy = state.get("error_strategy")
     print(f"   ├─ Error strategy: {strategy}")
@@ -772,6 +818,10 @@ def run_workflow(workflow_state):
         "compile_attempts": workflow_state.compile_attempts,
         "last_error": workflow_state.compile_result.error_msg if workflow_state.compile_result else None,
         "compile_success": workflow_state.compilation_phase_complete(),
+        "error_history": [],  # 에러 히스토리 초기화
+        "classified_error": workflow_state.classified_error,
+        "error_strategy": workflow_state.error_strategy,
+        "user_action": None,
         "final_module_path": workflow_state.spec_file,
         "messages": []
     }
