@@ -1,0 +1,11 @@
+{
+  "project_id": "outsourcing_3",
+  "name": "outsourcing_3",
+  "description": "문제 입력 용역 계약서\n발주: 공감학원\n수주: (주) 스피라티\n금액: 공급가액(5065만원)\n기한: 10/1 ~ 12/31",
+  "created_at": "2025-10-27T19:57:57.293877",
+  "updated_at": "2025-10-27T05:13:46.319133",
+  "db_ref": null,
+  "status": "in_progress",
+  "tags": [],
+  "owner": ""
+}
