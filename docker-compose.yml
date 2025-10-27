@@ -10,18 +10,19 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./agent:/app/agent
-      - ./Spec:/app/Spec
-      - ./Core:/app/Core
-      - ./Domains:/app/Domains
-      - ./output:/app/output
-      - ./direction:/app/direction
+      - ./backend:/app/backend
+      - ./idris2:/app/idris2
+      - ./docs:/app/docs
+      - ./projects:/app/projects
+      - ./scripts:/app/scripts
+      - ./mcp-servers:/app/mcp-servers
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
       - IDRIS2_PATH=/usr/local/bin/idris2
-    command: uvicorn agent.main:app --host 0.0.0.0 --port 8000 --reload
+      - PYTHONPATH=/app
+    command: uvicorn backend.agent.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - typedcontract_network
 

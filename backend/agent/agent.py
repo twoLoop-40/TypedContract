@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 # .env 파일 로드
 load_dotenv()
 
-from agent.prompts import (
+from backend.agent.prompts import (
     ANALYZE_DOCUMENT_PROMPT,
     GENERATE_IDRIS_PROMPT,
     FIX_ERROR_PROMPT,
@@ -25,7 +25,7 @@ from agent.prompts import (
     GENERATE_PIPELINE_PROMPT
 )
 
-from agent.error_classifier import (
+from backend.agent.error_classifier import (
     classify_error,
     decide_strategy,
     ErrorLevel,
