@@ -69,6 +69,19 @@ class AgentState(TypedDict):
 # Tools
 # ============================================================================
 
+def to_pascal_case(snake_str: str) -> str:
+    """
+    snake_case를 PascalCase로 변환 (Idris2 모듈 이름 규칙)
+
+    Examples:
+        test_contract_final → TestContractFinal
+        problem_input_v3 → ProblemInputV3
+        my_contract → MyContract
+    """
+    components = snake_str.split('_')
+    return ''.join(word.capitalize() for word in components)
+
+
 def call_claude(system_prompt: str, user_message: str = "", temperature: float = 0.0) -> str:
     """
     Claude Sonnet 4.5 API 호출 헬퍼 함수
@@ -257,8 +270,13 @@ def generate_idris_code(state: AgentState) -> AgentState:
     """Node 2: Idris2 코드 생성"""
     print("\n⚙️  [2/5] Generating Idris2 code...")
 
+    # Idris2 모듈 이름은 PascalCase여야 함
+    module_name = to_pascal_case(state["project_name"])
+    print(f"   ├─ Project name: {state['project_name']}")
+    print(f"   └─ Module name: {module_name}")
+
     prompt = GENERATE_IDRIS_PROMPT.format(
-        project_name=state["project_name"],
+        project_name=module_name,
         analysis=state["analysis"]
     )
 

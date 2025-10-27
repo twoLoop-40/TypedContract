@@ -95,10 +95,10 @@ GENERATE_IDRIS_PROMPT = """당신은 Idris2 전문가입니다.
 module Domains.{project_name}
 ```
 
-**CRITICAL**: 모듈 이름은 반드시 프로젝트 이름과 정확히 일치해야 합니다.
-- 프로젝트: `problem_input_v3` → 모듈: `module Domains.problem_input_v3`
-- 프로젝트: `my_contract` → 모듈: `module Domains.my_contract`
-- ❌ PascalCase 변환 금지 (ProblemInputV3, MyContract 등)
+**CRITICAL**: 모듈 이름은 반드시 PascalCase로 작성해야 합니다 (Idris2 규칙).
+- 프로젝트: `{{project_name}}` (이미 PascalCase로 전달됨)
+- 모듈: `module Domains.{{project_name}}` (그대로 사용)
+- 예시: `TestContractFinal`, `ProblemInputV3`, `MyContract`
 
 2. **Layer 1: Primitive Types**
 ```idris
