@@ -62,8 +62,23 @@ export default function NewProject() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setFiles(Array.from(e.target.files))
+      // 기존 파일에 새 파일 추가
+      setFiles([...files, ...Array.from(e.target.files)])
     }
+  }
+
+  const removeFile = (index: number) => {
+    setFiles(files.filter((_, i) => i !== index))
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const droppedFiles = Array.from(e.dataTransfer.files)
+    setFiles([...files, ...droppedFiles])
+  }
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
   }
 
   return (
@@ -121,25 +136,74 @@ export default function NewProject() {
         {/* File Upload */}
         <div>
           <label htmlFor="files" className="label">
-            참조 문서 (선택)
+            참조 문서 (선택) - 여러 파일 가능
           </label>
-          <input
-            id="files"
-            type="file"
-            multiple
-            className="input"
-            onChange={handleFileChange}
-            accept=".pdf,.txt,.md,.doc,.docx"
-            disabled={step !== 'input'}
-          />
-          <p className="mt-1 text-sm text-gray-500">
-            PDF, 텍스트, Word 문서 등을 업로드할 수 있습니다
-          </p>
+
+          {/* Drag & Drop Area */}
+          <div
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+              step === 'input'
+                ? 'border-gray-300 hover:border-primary hover:bg-gray-50 cursor-pointer'
+                : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+            }`}
+          >
+            <input
+              id="files"
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleFileChange}
+              accept=".pdf,.txt,.md,.doc,.docx"
+              disabled={step !== 'input'}
+            />
+            <label
+              htmlFor="files"
+              className={`cursor-pointer ${step !== 'input' ? 'cursor-not-allowed' : ''}`}
+            >
+              <div className="space-y-2">
+                <div className="text-4xl">📁</div>
+                <div className="text-gray-600">
+                  <span className="font-semibold text-primary">파일 선택</span> 또는 여기에 드래그
+                </div>
+                <div className="text-xs text-gray-500">
+                  PDF, TXT, MD, DOC, DOCX 지원
+                </div>
+              </div>
+            </label>
+          </div>
+
+          {/* File List */}
           {files.length > 0 && (
-            <div className="mt-2 space-y-1">
+            <div className="mt-4 space-y-2">
+              <div className="text-sm font-semibold text-gray-700">
+                업로드된 파일 ({files.length}개)
+              </div>
               {files.map((file, idx) => (
-                <div key={idx} className="text-sm text-gray-600">
-                  📄 {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                <div
+                  key={idx}
+                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200"
+                >
+                  <div className="flex items-center gap-3 flex-1">
+                    <span className="text-2xl">📄</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">
+                        {file.name}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {(file.size / 1024).toFixed(1)} KB
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeFile(idx)}
+                    className="ml-3 px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+                    disabled={step !== 'input'}
+                  >
+                    삭제
+                  </button>
                 </div>
               ))}
             </div>
