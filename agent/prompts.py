@@ -88,6 +88,29 @@ GENERATE_IDRIS_PROMPT = """당신은 Idris2 전문가입니다.
 {analysis}
 ```
 
+## 🚨 BEFORE YOU START: MCP 서버 활용 (필수!)
+
+**CRITICAL**: 코드를 작성하기 **전에** 반드시 MCP 서버에서 가이드라인을 참조하세요!
+
+### Step 0: 필수 가이드라인 읽기
+
+```
+1. Read resource: idris2://guidelines/project
+   → Critical parser constraints (MUST READ FIRST!)
+
+2. If you need syntax help:
+   - Read: idris2://guidelines/syntax
+   - Or search: search_guidelines("data types")
+
+3. If you need type system help:
+   - Read: idris2://guidelines/types
+   - Or search: search_guidelines("dependent types")
+```
+
+**이 단계를 건너뛰면 parser error가 발생합니다!**
+
+---
+
 ## 요구사항
 
 1. **모듈 구조**
@@ -250,6 +273,27 @@ validAmount a = a.total == plus a.supply a.vat
 
 **완전하고 타입 체크 가능한 Idris2 코드를 생성하세요.**
 
+## 🔍 BEFORE SUBMITTING: 자가 검증 체크리스트
+
+코드를 작성한 후 **반드시** MCP 서버로 검증하세요:
+
+```
+✅ Step 1: validate_syntax
+   → Check for parser issues (long names, unmatched parens)
+
+✅ Step 2: Manual inspection
+   - All parameter names ≤ 8 characters?
+   - Using operators (+, -) not functions (plus, minus)?
+   - All data constructors on one line?
+   - All types have 'public export'?
+
+✅ Step 3: If uncertain
+   - Use: search_guidelines("similar pattern")
+   - Compare with examples from guidelines
+```
+
+**Validation first, submission second!**
+
 출력 형식: 순수 Idris2 코드만 (설명 없이)
 """
 
@@ -266,6 +310,31 @@ FIX_ERROR_PROMPT = """다음 Idris2 코드에 컴파일 에러가 발생했습�
 ```
 {error_message}
 ```
+
+## 🚨 STEP 1: MCP 서버로 에러 분석 (필수!)
+
+**IMPORTANT**: 코드를 수정하기 전에 MCP 서버를 활용하세요!
+
+```
+1. Use tool: suggest_fix
+   Parameters: {{"error_message": "...", "code": "..."}}
+   → Get intelligent fix suggestions
+
+2. If parser error ("Expected 'case', 'if', 'do'..."):
+   - Read: idris2://guidelines/project
+   - Or use: get_guideline_section({{"topic": "parser_constraints"}})
+
+3. If type error:
+   - Search: search_guidelines("type mismatch")
+   - Or read: idris2://guidelines/types
+
+4. If undefined name:
+   - Search: search_guidelines("imports")
+```
+
+**이 단계를 먼저 수행하면 에러를 더 빠르게 수정할 수 있습니다!**
+
+---
 
 ## 에러 분석 및 수정
 
