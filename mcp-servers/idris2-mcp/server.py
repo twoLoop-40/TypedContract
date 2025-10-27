@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Idris2 MCP Server
-Provides tools for Idris2 type-checking, syntax validation, and code generation
+Idris2 MCP Server (Enhanced)
+Provides tools for Idris2 type-checking, syntax validation, code generation,
+and contextual guideline access from official documentation
 """
 
 import asyncio
 import subprocess
 import tempfile
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,8 +26,10 @@ from mcp.types import (
 # Initialize MCP server
 server = Server("idris2-helper")
 
-# Path to guidelines document
-GUIDELINES_PATH = Path(__file__).parent.parent.parent / "docs" / "IDRIS2_CODE_GENERATION_GUIDELINES.md"
+# Path to guidelines documents
+BASE_DIR = Path(__file__).parent.parent.parent
+PROJECT_GUIDELINES = BASE_DIR / "docs" / "IDRIS2_CODE_GENERATION_GUIDELINES.md"
+OFFICIAL_GUIDELINES_DIR = BASE_DIR / "docs" / "idris2-official-guidelines"
 
 # ============================================================================
 # Resources
@@ -34,24 +38,72 @@ GUIDELINES_PATH = Path(__file__).parent.parent.parent / "docs" / "IDRIS2_CODE_GE
 @server.list_resources()
 async def handle_list_resources() -> list[Resource]:
     """List available resources"""
-    return [
+    resources = [
         Resource(
-            uri="idris2://guidelines",
-            name="Idris2 Code Generation Guidelines",
-            description="Best practices and critical rules for generating Idris2 code",
+            uri="idris2://guidelines/project",
+            name="Project-Specific Idris2 Guidelines",
+            description="Critical parser constraints and best practices for this project",
+            mimeType="text/markdown"
+        ),
+        Resource(
+            uri="idris2://guidelines/syntax",
+            name="Idris2 Syntax Basics",
+            description="Fundamental syntax and language constructs",
+            mimeType="text/markdown"
+        ),
+        Resource(
+            uri="idris2://guidelines/types",
+            name="Idris2 Type System",
+            description="Advanced type system features (dependent types, multiplicities, proofs)",
+            mimeType="text/markdown"
+        ),
+        Resource(
+            uri="idris2://guidelines/modules",
+            name="Modules and Namespaces",
+            description="Module system and code organization",
+            mimeType="text/markdown"
+        ),
+        Resource(
+            uri="idris2://guidelines/advanced",
+            name="Advanced Patterns",
+            description="Views, theorem proving, FFI, metaprogramming",
+            mimeType="text/markdown"
+        ),
+        Resource(
+            uri="idris2://guidelines/pragmas",
+            name="Pragmas Reference",
+            description="Complete reference for all Idris2 pragmas",
+            mimeType="text/markdown"
+        ),
+        Resource(
+            uri="idris2://guidelines/index",
+            name="Guidelines Index",
+            description="Overview and quick reference for all guidelines",
             mimeType="text/markdown"
         )
     ]
+    return resources
 
 
 @server.read_resource()
 async def handle_read_resource(uri: str) -> str:
     """Read resource content"""
-    if uri == "idris2://guidelines":
-        if GUIDELINES_PATH.exists():
-            return GUIDELINES_PATH.read_text(encoding='utf-8')
+    resource_map = {
+        "idris2://guidelines/project": PROJECT_GUIDELINES,
+        "idris2://guidelines/syntax": OFFICIAL_GUIDELINES_DIR / "01-SYNTAX-BASICS.md",
+        "idris2://guidelines/types": OFFICIAL_GUIDELINES_DIR / "02-TYPE-SYSTEM.md",
+        "idris2://guidelines/modules": OFFICIAL_GUIDELINES_DIR / "03-MODULES-NAMESPACES.md",
+        "idris2://guidelines/advanced": OFFICIAL_GUIDELINES_DIR / "04-ADVANCED-PATTERNS.md",
+        "idris2://guidelines/pragmas": OFFICIAL_GUIDELINES_DIR / "05-PRAGMAS-REFERENCE.md",
+        "idris2://guidelines/index": OFFICIAL_GUIDELINES_DIR / "README.md",
+    }
+
+    if uri in resource_map:
+        file_path = resource_map[uri]
+        if file_path.exists():
+            return file_path.read_text(encoding='utf-8')
         else:
-            return "Guidelines not found. Please check the file path."
+            return f"Guidelines not found at {file_path}"
     else:
         raise ValueError(f"Unknown resource: {uri}")
 
@@ -149,6 +201,52 @@ async def handle_list_tools() -> list[Tool]:
                 },
                 "required": ["error_message", "code"]
             }
+        ),
+        Tool(
+            name="search_guidelines",
+            description="Search Idris2 guidelines for specific topics or keywords",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (e.g., 'dependent types', 'linear types', '%inline')"
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["all", "syntax", "types", "modules", "advanced", "pragmas"],
+                        "description": "Limit search to specific category (default: all)"
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
+        Tool(
+            name="get_guideline_section",
+            description="Get specific section from guidelines (more focused than full resource)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "enum": [
+                            "parser_constraints",
+                            "multiplicities",
+                            "dependent_types",
+                            "interfaces",
+                            "modules",
+                            "views",
+                            "proofs",
+                            "ffi",
+                            "pragmas_inline",
+                            "pragmas_foreign",
+                            "totality"
+                        ],
+                        "description": "Specific topic to retrieve"
+                    }
+                },
+                "required": ["topic"]
+            }
         )
     ]
 
@@ -167,6 +265,10 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
         return await validate_idris2_syntax(arguments)
     elif name == "suggest_fix":
         return await suggest_idris2_fix(arguments)
+    elif name == "search_guidelines":
+        return await search_guidelines(arguments)
+    elif name == "get_guideline_section":
+        return await get_guideline_section(arguments)
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -279,7 +381,7 @@ data {name}Proof : (x : Nat) -> (y : Nat) -> Type where
 """,
         "smart_constructor": f"""public export
 data {name} : Type where
-  Mk{name} : (value : Nat) -> (constraint : value > 0) -> {name}
+  Mk{name} : (val : Nat) -> (ok : val > 0) -> {name}
 
 public export
 mk{name} : (n : Nat) -> {{auto prf : LTE 1 n}} -> {name}
@@ -315,6 +417,15 @@ async def validate_idris2_syntax(args: dict) -> list[TextContent]:
         if stripped.count('(') != stripped.count(')'):
             issues.append(f"Line {i}: Unmatched parentheses")
 
+        # Check for long parameter names (critical!)
+        if 'data' in stripped or 'constructor' in stripped.lower():
+            params = re.findall(r'\((\w+)\s*:', stripped)
+            if len(params) >= 3:
+                long_params = [p for p in params if len(p) > 8]
+                if long_params:
+                    issues.append(f"Line {i}: 🚨 CRITICAL - Long parameter names detected: {', '.join(long_params)}")
+                    issues.append(f"         Parser may fail with 3+ params having long names (>8 chars)")
+
     if issues:
         response = "⚠️ Potential syntax issues found:\n\n" + "\n".join(f"- {issue}" for issue in issues)
     else:
@@ -337,7 +448,7 @@ async def suggest_idris2_fix(args: dict) -> list[TextContent]:
         suggestions.append("FIX: Shorten parameter names to 6-8 characters or less")
         suggestions.append("Example: Change (govSupport : Nat) -> (cashMatch : Nat) -> (inKindMatch : Nat)")
         suggestions.append("     To: (gov : Nat) -> (cash : Nat) -> (inKind : Nat)")
-        suggestions.append("📖 See: idris2://guidelines resource for full details")
+        suggestions.append("📖 See: idris2://guidelines/project resource for full details")
 
     elif "Expected a type declaration" in error_msg:
         suggestions.append("Add a type signature before the constructor in 'data' declarations")
@@ -351,14 +462,16 @@ async def suggest_idris2_fix(args: dict) -> list[TextContent]:
     elif "Undefined name" in error_msg:
         suggestions.append("Check if you've imported the required module")
         suggestions.append("Verify the spelling of the identifier")
+        suggestions.append("📖 Use search_guidelines tool to find correct import")
 
     elif "Type mismatch" in error_msg:
         suggestions.append("Check that your types align correctly")
         suggestions.append("Use :t in REPL to check inferred types")
+        suggestions.append("📖 See: idris2://guidelines/types for type system help")
 
     if not suggestions:
         suggestions.append("Try breaking down complex type signatures")
-        suggestions.append("Check idris2://guidelines resource for common patterns")
+        suggestions.append("Check idris2://guidelines/* resources for common patterns")
         suggestions.append("Ensure parameter names are SHORT (6-8 chars max)")
 
     response = f"""## Suggested Fixes
@@ -376,8 +489,122 @@ async def suggest_idris2_fix(args: dict) -> list[TextContent]:
 {code[:200]}...
 ```
 
-💡 **Tip**: Read the `idris2://guidelines` resource for comprehensive Idris2 code generation rules!
+💡 **Tip**: Use the `search_guidelines` tool to find relevant documentation!
 """
+
+    return [TextContent(type="text", text=response)]
+
+
+async def search_guidelines(args: dict) -> list[TextContent]:
+    """Search guidelines for specific topics"""
+    query = args["query"].lower()
+    category = args.get("category", "all")
+
+    # Determine which files to search
+    search_files = []
+    if category == "all":
+        search_files = list(OFFICIAL_GUIDELINES_DIR.glob("*.md"))
+        search_files.append(PROJECT_GUIDELINES)
+    elif category == "syntax":
+        search_files = [OFFICIAL_GUIDELINES_DIR / "01-SYNTAX-BASICS.md"]
+    elif category == "types":
+        search_files = [OFFICIAL_GUIDELINES_DIR / "02-TYPE-SYSTEM.md"]
+    elif category == "modules":
+        search_files = [OFFICIAL_GUIDELINES_DIR / "03-MODULES-NAMESPACES.md"]
+    elif category == "advanced":
+        search_files = [OFFICIAL_GUIDELINES_DIR / "04-ADVANCED-PATTERNS.md"]
+    elif category == "pragmas":
+        search_files = [OFFICIAL_GUIDELINES_DIR / "05-PRAGMAS-REFERENCE.md"]
+
+    results = []
+
+    for file_path in search_files:
+        if not file_path.exists():
+            continue
+
+        content = file_path.read_text(encoding='utf-8')
+        lines = content.split('\n')
+
+        # Search for query in headers and surrounding content
+        for i, line in enumerate(lines):
+            if query in line.lower():
+                # Get context (surrounding lines)
+                start = max(0, i - 2)
+                end = min(len(lines), i + 5)
+                context = '\n'.join(lines[start:end])
+
+                results.append({
+                    'file': file_path.name,
+                    'line': i + 1,
+                    'context': context
+                })
+
+                # Limit results per file
+                if len([r for r in results if r['file'] == file_path.name]) >= 3:
+                    break
+
+    if results:
+        response = f"## Search Results for '{query}'\n\n"
+        for r in results[:10]:  # Limit total results
+            response += f"### {r['file']} (line {r['line']})\n```\n{r['context']}\n```\n\n"
+    else:
+        response = f"No results found for '{query}'. Try broader terms or check the index at idris2://guidelines/index"
+
+    return [TextContent(type="text", text=response)]
+
+
+async def get_guideline_section(args: dict) -> list[TextContent]:
+    """Get specific guideline section"""
+    topic = args["topic"]
+
+    # Map topics to file sections
+    section_map = {
+        "parser_constraints": (PROJECT_GUIDELINES, "Parser 제약사항"),
+        "multiplicities": (OFFICIAL_GUIDELINES_DIR / "02-TYPE-SYSTEM.md", "Multiplicities"),
+        "dependent_types": (OFFICIAL_GUIDELINES_DIR / "02-TYPE-SYSTEM.md", "Dependent Types"),
+        "interfaces": (OFFICIAL_GUIDELINES_DIR / "02-TYPE-SYSTEM.md", "Interfaces"),
+        "modules": (OFFICIAL_GUIDELINES_DIR / "03-MODULES-NAMESPACES.md", "Module Structure"),
+        "views": (OFFICIAL_GUIDELINES_DIR / "04-ADVANCED-PATTERNS.md", "Views"),
+        "proofs": (OFFICIAL_GUIDELINES_DIR / "04-ADVANCED-PATTERNS.md", "Theorem Proving"),
+        "ffi": (OFFICIAL_GUIDELINES_DIR / "04-ADVANCED-PATTERNS.md", "Foreign Function Interface"),
+        "pragmas_inline": (OFFICIAL_GUIDELINES_DIR / "05-PRAGMAS-REFERENCE.md", "%inline"),
+        "pragmas_foreign": (OFFICIAL_GUIDELINES_DIR / "05-PRAGMAS-REFERENCE.md", "%foreign"),
+        "totality": (OFFICIAL_GUIDELINES_DIR / "02-TYPE-SYSTEM.md", "Totality"),
+    }
+
+    if topic not in section_map:
+        return [TextContent(type="text", text=f"Unknown topic: {topic}")]
+
+    file_path, section_name = section_map[topic]
+
+    if not file_path.exists():
+        return [TextContent(type="text", text=f"Guidelines not found at {file_path}")]
+
+    content = file_path.read_text(encoding='utf-8')
+    lines = content.split('\n')
+
+    # Find section
+    section_lines = []
+    in_section = False
+    section_level = 0
+
+    for line in lines:
+        if section_name.lower() in line.lower() and line.startswith('#'):
+            in_section = True
+            section_level = len(line) - len(line.lstrip('#'))
+            section_lines.append(line)
+        elif in_section:
+            # Check if we've hit a same-level or higher-level header
+            if line.startswith('#'):
+                current_level = len(line) - len(line.lstrip('#'))
+                if current_level <= section_level:
+                    break
+            section_lines.append(line)
+
+    if section_lines:
+        response = '\n'.join(section_lines)
+    else:
+        response = f"Section '{section_name}' not found in {file_path.name}"
 
     return [TextContent(type="text", text=response)]
 
@@ -394,7 +621,7 @@ async def main():
             write_stream,
             InitializationOptions(
                 server_name="idris2-helper",
-                server_version="1.0.0",
+                server_version="2.0.0",
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},

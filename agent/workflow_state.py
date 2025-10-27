@@ -106,6 +106,7 @@ class WorkflowState:
     # Phase 4b: 에러 핸들링
     classified_error: Optional[dict] = None  # ClassifiedError (JSON)
     error_strategy: Optional[str] = None     # ErrorStrategy
+    error_suggestion: Optional[dict] = None  # 동일 에러 3회 시 사용자 제안
     user_action: Optional[str] = None        # 사용자 선택한 액션
     error_history: List[str] = field(default_factory=list)  # 최근 에러 메시지 추적
 
@@ -130,6 +131,11 @@ class WorkflowState:
 
     # 실시간 로그 (프론트엔드 모니터링용)
     logs: List[str] = field(default_factory=list)  # 최근 100개 로그 유지
+
+    # 활동 추적 (백엔드 활동 상태)
+    is_active: bool = False  # 현재 작업 중인지
+    last_activity: Optional[str] = None  # 마지막 활동 시간 (ISO format)
+    current_action: Optional[str] = None  # 현재 수행 중인 작업
 
     # ========================================================================
     # 상태 검증 (Spec/WorkflowTypes.idr의 검증 함수들)
@@ -197,6 +203,21 @@ class WorkflowState:
         # 최근 100개만 유지
         if len(self.logs) > 100:
             self.logs = self.logs[-100:]
+
+    def mark_active(self, action: str):
+        """백엔드 활동 시작 표시"""
+        from datetime import datetime
+        self.is_active = True
+        self.last_activity = datetime.now().isoformat()
+        self.current_action = action
+        self.add_log(f"🔵 {action}")
+
+    def mark_inactive(self):
+        """백엔드 활동 종료 표시"""
+        from datetime import datetime
+        self.is_active = False
+        self.last_activity = datetime.now().isoformat()
+        self.current_action = None
 
     # ========================================================================
     # 상태 전이 (Spec/WorkflowTypes.idr의 전이 함수들)

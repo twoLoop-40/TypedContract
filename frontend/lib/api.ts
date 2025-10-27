@@ -115,6 +115,27 @@ export async function downloadPDF(projectName: string) {
 }
 
 // ============================================================================
+// Project Recovery
+// ============================================================================
+
+export async function resumeProject(
+  projectName: string,
+  updatedPrompt?: string,
+  restartFromAnalysis: boolean = false
+) {
+  const response = await api.post(`/api/project/${projectName}/resume`, {
+    updated_prompt: updatedPrompt,
+    restart_from_analysis: restartFromAnalysis,
+  })
+  return response.data
+}
+
+export async function abortProject(projectName: string) {
+  const response = await api.post(`/api/project/${projectName}/abort`)
+  return response.data
+}
+
+// ============================================================================
 // Health Check
 // ============================================================================
 

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createProject, uploadFiles, startGeneration } from '@/lib/api'
 
 export default function NewProject() {
@@ -83,7 +84,12 @@ export default function NewProject() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-3xl font-bold mb-8">새 프로젝트 생성</h1>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-3xl font-bold">새 프로젝트 생성</h1>
+        <Link href="/" className="btn btn-secondary text-sm">
+          ← 홈으로
+        </Link>
+      </div>
 
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">

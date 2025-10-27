@@ -725,9 +725,22 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
         last_three = error_history[-3:]
         if last_three[0] == last_three[1] == last_three[2]:
             print(f"   ├─ Same error repeated 3 times: {last_three[0][:60]}...")
-            print(f"   └─ Decision: fail (identical error repeated)")
-            add_log(state, f"⛔ 동일 에러 3회 반복 감지 - 중단: {last_three[0][:50]}...")
-            return "fail"
+            print(f"   └─ Decision: ask_user (identical error, need manual intervention)")
+            add_log(state, f"⛔ 동일 에러 3회 반복 - 사용자 개입 필요: {last_three[0][:50]}...")
+
+            # 사용자에게 유용한 피드백 제공
+            state["error_suggestion"] = {
+                "reason": "identical_error_3x",
+                "message": "동일한 에러가 3회 반복되어 자동 수정이 어렵습니다.",
+                "suggestions": [
+                    "프롬프트를 더 구체적으로 작성해주세요 (예: 금액, 날짜, 항목을 명확히)",
+                    "참조 문서를 추가로 업로드해주세요",
+                    "요구사항을 단순화하거나 나누어서 시도해보세요"
+                ],
+                "error_preview": last_three[0][:200],
+                "can_retry": True
+            }
+            return "ask_user"  # fail 대신 ask_user로 변경
 
     # 에러 전략에 따라 분기
     strategy = state.get("error_strategy")
