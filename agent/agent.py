@@ -650,13 +650,9 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
     print(f"   ├─ Error strategy: {strategy}")
 
     if strategy == "auto_fix":
-        # 문법 에러 - 자동 수정 시도 (최대 5회)
-        if state["compile_attempts"] < 5:
-            print(f"   └─ Decision: fix_error (attempt {state['compile_attempts'] + 1}/5)")
-            return "fix_error"
-        else:
-            print(f"   └─ Decision: fail (max retries reached)")
-            return "fail"
+        # 문법 에러 - 자동 수정 시도 (동일 에러 3회까지만)
+        print(f"   └─ Decision: fix_error (attempt {state['compile_attempts'] + 1})")
+        return "fix_error"
 
     elif strategy == "ask_user":
         # 증명 실패 또는 알 수 없는 에러 - 사용자에게 물어봄
@@ -680,11 +676,8 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
         return "fail"
 
     else:
-        # 기본값: 에러 전략이 없으면 기존 로직 사용
+        # 기본값: 에러 전략이 없으면 계속 수정 시도 (동일 에러 3회까지만)
         print(f"   ├─ No strategy set, using default logic")
-        if state["compile_attempts"] >= 5:
-            print(f"   └─ Decision: fail (max retries)")
-            return "fail"
         print(f"   └─ Decision: fix_error (default)")
         return "fix_error"
 

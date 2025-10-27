@@ -219,9 +219,13 @@ AGGRESSIVE_RETRY_POLICY = RetryPolicy(
 
 
 def should_retry(policy: RetryPolicy, level: ErrorLevel, attempt_count: int) -> bool:
-    """재시도 가능 여부 확인 (Spec/ErrorHandling.idr:200-206)"""
+    """
+    재시도 가능 여부 확인 (Spec/ErrorHandling.idr:200-206)
+
+    SYNTAX_ERROR는 무제한 재시도 (동일 에러 3회는 agent.py에서 체크)
+    """
     if level == ErrorLevel.SYNTAX_ERROR:
-        return attempt_count < policy.max_syntax_retries
+        return True  # 무제한 재시도 (동일 에러 3회 체크는 should_continue에서)
     elif level == ErrorLevel.PROOF_FAILURE:
         return policy.auto_retry_proof and attempt_count < policy.max_proof_retries
     elif level == ErrorLevel.DOMAIN_ERROR:
