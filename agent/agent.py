@@ -64,6 +64,32 @@ class AgentState(TypedDict):
     # 출력
     final_module_path: Optional[str]
     messages: List[str]
+    logs: List[str]  # 실시간 로그 (프론트엔드 모니터링용)
+
+
+# ============================================================================
+# Logging Helper
+# ============================================================================
+
+def add_log(state: AgentState, message: str) -> None:
+    """
+    타임스탬프와 함께 로그 메시지 추가 (최근 100개 유지)
+
+    Args:
+        state: AgentState
+        message: 로그 메시지
+    """
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    log_entry = f"[{timestamp}] {message}"
+
+    if "logs" not in state:
+        state["logs"] = []
+
+    state["logs"].append(log_entry)
+    # 최근 100개만 유지
+    if len(state["logs"]) > 100:
+        state["logs"] = state["logs"][-100:]
 
 
 # ============================================================================
@@ -282,6 +308,7 @@ def read_reference_doc(file_path: str) -> str:
 def analyze_document(state: AgentState) -> AgentState:
     """Node 1: 문서 분석"""
     print("\n📄 [1/5] Analyzing document...")
+    add_log(state, "📄 문서 분석 시작...")
 
     # 참고 문서 읽기
     docs_content = "\n\n".join([
@@ -303,6 +330,7 @@ def analyze_document(state: AgentState) -> AgentState:
 
     state["analysis"] = analysis
     state["messages"].append(f"✅ 문서 분석 완료: {analysis_file}")
+    add_log(state, f"✅ 문서 분석 완료: {len(state['reference_docs'])}개 문서 처리")
 
     return state
 
@@ -315,6 +343,7 @@ def generate_idris_code(state: AgentState) -> AgentState:
     module_name = to_pascal_case(state["project_name"])
     print(f"   ├─ Project name: {state['project_name']}")
     print(f"   └─ Module name: {module_name}")
+    add_log(state, f"⚙️  Idris2 코드 생성 시작: {module_name}")
 
     prompt = GENERATE_IDRIS_PROMPT.format(
         project_name=module_name,
@@ -323,6 +352,7 @@ def generate_idris_code(state: AgentState) -> AgentState:
 
     # Claude Sonnet 4.5 호출
     idris_code = call_claude(system_prompt=prompt).strip()
+    add_log(state, f"✅ Idris2 코드 생성 완료: {len(idris_code)} chars")
 
     # 코드 블록 제거 (```idris ... ```)
     if idris_code.startswith("```"):
@@ -341,6 +371,7 @@ def generate_idris_code(state: AgentState) -> AgentState:
 def typecheck_code(state: AgentState) -> AgentState:
     """Node 3: 타입 체크 + 에러 분류"""
     print(f"\n🔍 [3/5] Type checking (attempt {state['compile_attempts'] + 1})...")
+    add_log(state, f"🔍 타입 체크 시작 (시도 {state['compile_attempts'] + 1})")
 
     # 파일 저장
     save_msg = save_idris_file(state["idris_code"], state["current_file"])
@@ -354,6 +385,7 @@ def typecheck_code(state: AgentState) -> AgentState:
     state["last_error"] = None if success else output
 
     if success:
+        add_log(state, "✅ 컴파일 성공!")
         state["messages"].append(f"✅ 타입 체크 성공!")
         state["final_module_path"] = state["current_file"]
         state["classified_error"] = None
@@ -362,6 +394,7 @@ def typecheck_code(state: AgentState) -> AgentState:
         state["error_history"] = []
     else:
         state["messages"].append(f"❌ 타입 체크 실패:\n{output}")
+        add_log(state, f"❌ 컴파일 실패 (시도 {state['compile_attempts']})")
 
         # 에러 히스토리에 정규화된 에러 추가
         normalized_error = normalize_error_message(output)
@@ -372,10 +405,12 @@ def typecheck_code(state: AgentState) -> AgentState:
 
         # 에러 분류 (Phase 4b)
         print(f"\n🔍 Classifying error...")
+        add_log(state, "🔍 에러 분류 중...")
         classified = classify_error(output)
         print(f"   ├─ Level: {classified.level.value}")
         print(f"   ├─ Auto-fixable: {classified.auto_fixable}")
         print(f"   └─ Message: {classified.message[:100]}...")
+        add_log(state, f"📋 에러 레벨: {classified.level.value}, 자동 수정: {'가능' if classified.auto_fixable else '불가능'}")
 
         state["classified_error"] = {
             "level": classified.level.value,
@@ -390,6 +425,7 @@ def typecheck_code(state: AgentState) -> AgentState:
         strategy = decide_strategy(DEFAULT_RETRY_POLICY, classified, state["compile_attempts"])
         state["error_strategy"] = strategy.value
         print(f"   └─ Strategy decided: {strategy.value}")
+        add_log(state, f"🎯 처리 전략: {strategy.value}")
 
         # 사용자 친화적 메시지
         user_msg = format_user_message(classified)
@@ -402,8 +438,10 @@ def typecheck_code(state: AgentState) -> AgentState:
 def fix_compilation_error(state: AgentState) -> AgentState:
     """Node 4: 에러 수정"""
     print(f"\n🔧 [4/5] Fixing compilation error (attempt {state['compile_attempts']})...")
-    print(f"   ├─ Error type: {state.get('classified_error', {}).get('level', 'unknown')}")
+    error_level = state.get('classified_error', {}).get('level', 'unknown')
+    print(f"   ├─ Error type: {error_level}")
     print(f"   └─ Calling Claude to fix code...")
+    add_log(state, f"🔧 에러 수정 시작 (시도 {state['compile_attempts']}, 레벨: {error_level})")
 
     prompt = FIX_ERROR_PROMPT.format(
         idris_code=state["idris_code"],
@@ -422,6 +460,7 @@ def fix_compilation_error(state: AgentState) -> AgentState:
 
     state["idris_code"] = fixed_code
     state["messages"].append(f"🔧 코드 수정 완료 (attempt {state['compile_attempts']})")
+    add_log(state, f"✅ 에러 수정 완료, 재시도 예정")
     print(f"   ✅ Code updated, will retry type checking...")
 
     return state
@@ -430,6 +469,7 @@ def fix_compilation_error(state: AgentState) -> AgentState:
 def generate_documentable_impl(state: AgentState) -> AgentState:
     """Node 5: Documentable 인스턴스 생성 (Phase 5)"""
     print("\n📝 [5/7] Generating Documentable instance...")
+    add_log(state, "📝 Phase 5: Documentable 인스턴스 생성 시작")
 
     # 도메인 코드 읽기
     domain_code = ""
@@ -452,6 +492,7 @@ def generate_documentable_impl(state: AgentState) -> AgentState:
     )
 
     # Claude Sonnet 4.5 호출
+    add_log(state, f"🤖 Claude에 Documentable 구현 요청: {module_name}")
     documentable_code = call_claude(system_prompt=prompt).strip()
 
     # 코드 블록 제거
@@ -462,14 +503,18 @@ def generate_documentable_impl(state: AgentState) -> AgentState:
     # 파일 저장 (PascalCase file name to match module name)
     documentable_file = f"DomainToDoc/{module_name}.idr"
     save_msg = save_idris_file(documentable_code, documentable_file)
+    add_log(state, f"💾 Documentable 파일 저장: {documentable_file}")
 
     # 타입 체크
+    add_log(state, "🔍 Documentable 타입 체크 중...")
     success, output = typecheck_idris(documentable_file)
 
     if success:
         state["messages"].append(f"✅ Documentable instance 생성 완료: {documentable_file}")
+        add_log(state, f"✅ Documentable 타입 체크 성공")
     else:
         state["messages"].append(f"⚠️ Documentable 타입 체크 실패:\n{output}")
+        add_log(state, f"⚠️ Documentable 타입 체크 실패")
 
     return state
 
@@ -477,6 +522,7 @@ def generate_documentable_impl(state: AgentState) -> AgentState:
 def generate_pipeline_impl(state: AgentState) -> AgentState:
     """Node 6: Pipeline 구현 생성 (Phase 5)"""
     print("\n⚙️ [6/7] Generating pipeline implementation...")
+    add_log(state, "⚙️ Phase 5: Pipeline 구현 생성 시작")
 
     # Convert to PascalCase for module name
     module_name = to_pascal_case(state["project_name"])
@@ -486,6 +532,7 @@ def generate_pipeline_impl(state: AgentState) -> AgentState:
     )
 
     # Claude Sonnet 4.5 호출
+    add_log(state, f"🤖 Claude에 Pipeline 구현 요청: {module_name}")
     pipeline_code = call_claude(system_prompt=prompt).strip()
 
     # 코드 블록 제거
@@ -496,14 +543,18 @@ def generate_pipeline_impl(state: AgentState) -> AgentState:
     # 파일 저장 (PascalCase file name to match module name)
     pipeline_file = f"Pipeline/{module_name}.idr"
     save_msg = save_idris_file(pipeline_code, pipeline_file)
+    add_log(state, f"💾 Pipeline 파일 저장: {pipeline_file}")
 
     # 타입 체크
+    add_log(state, "🔍 Pipeline 타입 체크 중...")
     success, output = typecheck_idris(pipeline_file)
 
     if success:
         state["messages"].append(f"✅ Pipeline 구현 완료: {pipeline_file}")
+        add_log(state, f"✅ Pipeline 타입 체크 성공 - Phase 5 완료")
     else:
         state["messages"].append(f"⚠️ Pipeline 타입 체크 실패:\n{output}")
+        add_log(state, f"⚠️ Pipeline 타입 체크 실패")
 
     return state
 
@@ -511,6 +562,7 @@ def generate_pipeline_impl(state: AgentState) -> AgentState:
 def generate_draft_outputs(state: AgentState) -> AgentState:
     """Node 7: 초안 생성 (Phase 6 - Draft Phase)"""
     print("\n📄 [7/7] Generating draft outputs (txt, csv, md)...")
+    add_log(state, "📄 Phase 6: 초안 생성 시작 (txt, csv, md)")
 
     # Convert to PascalCase for file name
     module_name = to_pascal_case(state["project_name"])
@@ -520,6 +572,7 @@ def generate_draft_outputs(state: AgentState) -> AgentState:
     outputs = {}
 
     # Text 렌더러
+    add_log(state, "📝 Text 렌더링 실행 중...")
     try:
         result = subprocess.run(
             ["idris2", "--exec", f"exampleText", pipeline_file],
@@ -531,12 +584,16 @@ def generate_draft_outputs(state: AgentState) -> AgentState:
         if result.returncode == 0:
             outputs["text"] = result.stdout
             state["messages"].append("✅ Text 렌더링 완료")
+            add_log(state, "✅ Text 렌더링 성공")
         else:
             state["messages"].append(f"⚠️ Text 렌더링 실패: {result.stderr}")
+            add_log(state, "⚠️ Text 렌더링 실패")
     except Exception as e:
         state["messages"].append(f"⚠️ Text 렌더링 에러: {str(e)}")
+        add_log(state, f"⚠️ Text 렌더링 에러: {str(e)}")
 
     # CSV 렌더러
+    add_log(state, "📊 CSV 렌더링 실행 중...")
     try:
         result = subprocess.run(
             ["idris2", "--exec", f"exampleCSV", pipeline_file],
@@ -548,12 +605,16 @@ def generate_draft_outputs(state: AgentState) -> AgentState:
         if result.returncode == 0:
             outputs["csv"] = result.stdout
             state["messages"].append("✅ CSV 렌더링 완료")
+            add_log(state, "✅ CSV 렌더링 성공")
         else:
             state["messages"].append(f"⚠️ CSV 렌더링 실패: {result.stderr}")
+            add_log(state, "⚠️ CSV 렌더링 실패")
     except Exception as e:
         state["messages"].append(f"⚠️ CSV 렌더링 에러: {str(e)}")
+        add_log(state, f"⚠️ CSV 렌더링 에러: {str(e)}")
 
     # Markdown 렌더러
+    add_log(state, "📋 Markdown 렌더링 실행 중...")
     try:
         result = subprocess.run(
             ["idris2", "--exec", f"exampleMarkdown", pipeline_file],
@@ -565,21 +626,35 @@ def generate_draft_outputs(state: AgentState) -> AgentState:
         if result.returncode == 0:
             outputs["markdown"] = result.stdout
             state["messages"].append("✅ Markdown 렌더링 완료")
+            add_log(state, "✅ Markdown 렌더링 성공")
         else:
             state["messages"].append(f"⚠️ Markdown 렌더링 실패: {result.stderr}")
+            add_log(state, "⚠️ Markdown 렌더링 실패")
     except Exception as e:
         state["messages"].append(f"⚠️ Markdown 렌더링 에러: {str(e)}")
+        add_log(state, f"⚠️ Markdown 렌더링 에러: {str(e)}")
 
     # 출력 저장
+    project_name = state["project_name"]
     output_dir = Path(f"./output/{project_name}")
     output_dir.mkdir(parents=True, exist_ok=True)
+    add_log(state, f"💾 초안 파일 저장 중... (output/{project_name}/)")
 
+    saved_files = []
     if outputs.get("text"):
         (output_dir / f"{project_name}_draft.txt").write_text(outputs["text"], encoding='utf-8')
+        saved_files.append("txt")
     if outputs.get("csv"):
         (output_dir / f"{project_name}_schedule.csv").write_text(outputs["csv"], encoding='utf-8')
+        saved_files.append("csv")
     if outputs.get("markdown"):
         (output_dir / f"{project_name}_draft.md").write_text(outputs["markdown"], encoding='utf-8')
+        saved_files.append("md")
+
+    if saved_files:
+        add_log(state, f"✅ Phase 6 완료! 생성된 파일: {', '.join(saved_files)}")
+    else:
+        add_log(state, "⚠️ Phase 6 완료되었으나 렌더링된 파일 없음")
 
     return state
 
@@ -631,9 +706,11 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
     print(f"\n🔀 Deciding next action...")
     print(f"   ├─ Compile success: {state['compile_success']}")
     print(f"   ├─ Compile attempts: {state['compile_attempts']}")
+    add_log(state, f"🔀 다음 액션 결정 중... (성공: {state['compile_success']}, 시도: {state['compile_attempts']})")
 
     if state["compile_success"]:
         print(f"   └─ Decision: finish (success!)")
+        add_log(state, "🎉 워크플로우 완료! Phase 5로 진행")
         return "finish"
 
     # 동일 에러 3회 연속 체크 (조기 종료)
@@ -643,6 +720,7 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
         if last_three[0] == last_three[1] == last_three[2]:
             print(f"   ├─ Same error repeated 3 times: {last_three[0][:60]}...")
             print(f"   └─ Decision: fail (identical error repeated)")
+            add_log(state, f"⛔ 동일 에러 3회 반복 감지 - 중단: {last_three[0][:50]}...")
             return "fail"
 
     # 에러 전략에 따라 분기
@@ -652,33 +730,39 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
     if strategy == "auto_fix":
         # 문법 에러 - 자동 수정 시도 (동일 에러 3회까지만)
         print(f"   └─ Decision: fix_error (attempt {state['compile_attempts'] + 1})")
+        add_log(state, f"🔄 에러 자동 수정 시도 예정 (다음 시도: {state['compile_attempts'] + 1})")
         return "fix_error"
 
     elif strategy == "ask_user":
         # 증명 실패 또는 알 수 없는 에러 - 사용자에게 물어봄
         print(f"   └─ Decision: ask_user")
+        add_log(state, "❓ 사용자 결정 필요 - 대기 중")
         return "ask_user"
 
     elif strategy == "fallback":
         # 증명 제거 후 계속 진행
         # TODO: 증명 제거 로직 구현
         print(f"   └─ Decision: finish (fallback)")
+        add_log(state, "⚡ Fallback 모드: 증명 제거 후 진행")
         return "finish"
 
     elif strategy == "reanalyze":
         # 도메인 에러 - 재분석 필요
         print(f"   └─ Decision: reanalyze")
+        add_log(state, "🔄 도메인 모델링 오류 - 재분석 필요")
         return "reanalyze"
 
     elif strategy == "terminate":
         # 중단
         print(f"   └─ Decision: fail (terminate)")
+        add_log(state, "⛔ 워크플로우 중단")
         return "fail"
 
     else:
         # 기본값: 에러 전략이 없으면 계속 수정 시도 (동일 에러 3회까지만)
         print(f"   ├─ No strategy set, using default logic")
         print(f"   └─ Decision: fix_error (default)")
+        add_log(state, "🔄 기본 전략: 에러 수정 재시도")
         return "fix_error"
 
 
@@ -829,7 +913,8 @@ def run_workflow(workflow_state):
         "error_strategy": workflow_state.error_strategy,
         "user_action": None,
         "final_module_path": workflow_state.spec_file,
-        "messages": []
+        "messages": [],
+        "logs": workflow_state.logs  # 기존 로그 유지
     }
 
     # Phase에 따라 시작점 결정
@@ -849,6 +934,7 @@ def run_workflow(workflow_state):
     workflow_state.spec_file = result.get("final_module_path")
     workflow_state.compile_attempts = result.get("compile_attempts", 0)
     workflow_state.error_history = result.get("error_history", [])  # 에러 히스토리 저장
+    workflow_state.logs = result.get("logs", [])  # 실시간 로그 동기화
 
     if result["compile_success"]:
         workflow_state.compile_result = CompileResult(success=True)
