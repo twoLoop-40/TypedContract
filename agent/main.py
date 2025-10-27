@@ -72,6 +72,13 @@ class ResumeRequest(BaseModel):
     updated_prompt: Optional[str] = None  # 수정된 프롬프트 (선택)
     restart_from_analysis: bool = False    # 분석부터 다시 시작할지
 
+class AutoPauseResumeRequest(BaseModel):
+    """AutoPaused 상태에서 재개 요청"""
+    option: str  # ResumeOption: retry_with_new_prompt, skip_validation, manual_fix, cancel
+    new_prompt: Optional[str] = None  # option=retry_with_new_prompt일 때 필요
+    new_docs: Optional[List[str]] = None  # option=retry_with_more_docs일 때 필요
+    fixed_file_path: Optional[str] = None  # option=manual_fix일 때 필요
+
 class DraftResponse(BaseModel):
     project_name: str
     text_content: Optional[str] = None
@@ -609,6 +616,215 @@ async def resume_project(
         "project_name": project_name,
         "status": "resuming",
         "message": "Project resume started"
+    }
+
+@app.get("/api/project/{project_name}/resume-options")
+async def get_resume_options(project_name: str):
+    """
+    Get available resume options for AutoPaused project
+
+    Implements Spec/WorkflowControl.idr availableResumeOptions
+    """
+    state = WorkflowState.load(project_name, Path("./output"))
+
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    # AutoPaused 상태 확인
+    if not state.is_paused:
+        return {
+            "project_name": project_name,
+            "is_paused": False,
+            "message": "Project is not in AutoPaused state"
+        }
+
+    # 재개 옵션 반환
+    return {
+        "project_name": project_name,
+        "is_paused": True,
+        "pause_reason": state.pause_reason,
+        "resume_options": state.resume_options,
+        "error_suggestion": state.error_suggestion,
+        "error_preview": state.error_history[-1] if state.error_history else None
+    }
+
+@app.post("/api/project/{project_name}/resume-autopause")
+async def resume_from_autopause(
+    project_name: str,
+    request: AutoPauseResumeRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Resume from AutoPaused state with selected option
+
+    Implements Spec/WorkflowControl.idr TransResumeAfterAutoPause
+    """
+    state = WorkflowState.load(project_name, Path("./output"))
+
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    if not state.is_paused:
+        raise HTTPException(status_code=400, detail="Project is not in AutoPaused state")
+
+    # Handle different resume options
+    if request.option == "retry_with_new_prompt":
+        if not request.new_prompt:
+            raise HTTPException(status_code=400, detail="new_prompt is required for retry_with_new_prompt")
+
+        state.user_prompt = request.new_prompt
+        state.current_phase = Phase.ANALYSIS
+        state.analysis_result = None
+        state.spec_code = None
+        state.compile_attempts = 0
+        state.error_history = []  # 에러 히스토리 초기화
+        state.add_log(f"🔄 새 프롬프트로 Phase 2부터 재시작")
+
+    elif request.option == "retry_with_more_docs":
+        if not request.new_docs:
+            raise HTTPException(status_code=400, detail="new_docs is required for retry_with_more_docs")
+
+        state.reference_docs.extend(request.new_docs)
+        state.current_phase = Phase.ANALYSIS
+        state.analysis_result = None
+        state.spec_code = None
+        state.compile_attempts = 0
+        state.error_history = []
+        state.add_log(f"📚 참조 문서 추가 후 Phase 2부터 재시작")
+
+    elif request.option == "skip_validation":
+        # 증명 제거하고 Phase 5로 진행
+        state.current_phase = Phase.DOC_IMPL
+        state.compile_attempts = 0
+        state.error_history = []
+        state.add_log(f"⚡ 검증 스킵 - Phase 5 (문서 구현)로 진행")
+
+    elif request.option == "manual_fix":
+        if not request.fixed_file_path:
+            raise HTTPException(status_code=400, detail="fixed_file_path is required for manual_fix")
+
+        # 사용자가 수정한 파일 경로 확인
+        fixed_path = Path(request.fixed_file_path)
+        if not fixed_path.exists():
+            raise HTTPException(status_code=400, detail=f"Fixed file not found: {request.fixed_file_path}")
+
+        # 현재 Phase에서 재개 (수정된 파일로 다시 컴파일)
+        state.compile_attempts = 0
+        state.error_history = []
+        state.add_log(f"🔧 수동 수정 완료 - 현재 Phase에서 재개")
+
+    elif request.option == "cancel":
+        state.completed = True
+        state.current_phase = Phase.FINAL
+        state.add_log(f"❌ 프로젝트 취소됨")
+        state.is_paused = False
+        state.save(Path("./output"))
+
+        return {
+            "project_name": project_name,
+            "status": "cancelled",
+            "message": "Project cancelled by user"
+        }
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid option: {request.option}")
+
+    # AutoPaused 상태 해제
+    state.is_paused = False
+    state.pause_reason = None
+    state.resume_options = []
+    state.compile_result = None
+    state.classified_error = None
+    state.error_strategy = None
+    state.mark_active(f"AutoPause 재개 중... (option: {request.option})")
+    state.save(Path("./output"))
+
+    # Background: Resume workflow
+    def resume_workflow():
+        current_state = WorkflowState.load(project_name, Path("./output"))
+        if current_state is None:
+            print(f"❌ State not found for {project_name}")
+            return
+
+        try:
+            print(f"\n🔄 Resuming from AutoPause for {project_name}...")
+            current_state.add_log("🔄 AutoPause에서 재개")
+
+            from agent.agent import run_workflow
+            updated_state = run_workflow(current_state)
+
+            updated_state.mark_inactive()
+            updated_state.save(Path("./output"))
+            print(f"\n✅ Resume completed!")
+
+        except Exception as e:
+            import traceback
+            error_msg = f"Resume error: {str(e)}"
+            print(f"\n❌ ERROR in resume:")
+            print(f"   Project: {project_name}")
+            print(f"   Error: {error_msg}")
+            traceback.print_exc()
+
+            error_state = WorkflowState.load(project_name, Path("./output"))
+            if error_state:
+                error_state.compile_result = CompileResult(success=False, error_msg=error_msg)
+                error_state.add_log(f"❌ 재개 실패: {str(e)}")
+                error_state.mark_inactive()
+                error_state.save(Path("./output"))
+
+    background_tasks.add_task(resume_workflow)
+
+    return {
+        "project_name": project_name,
+        "status": "resuming",
+        "option_applied": request.option,
+        "message": f"Resuming from AutoPause with option: {request.option}"
+    }
+
+@app.post("/api/project/{project_name}/skip-validation")
+async def skip_validation(
+    project_name: str,
+    background_tasks: BackgroundTasks
+):
+    """
+    Skip validation and proceed to document generation (Phase 5)
+
+    Shortcut for resume-autopause with skip_validation option
+    """
+    state = WorkflowState.load(project_name, Path("./output"))
+
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    # AutoPaused가 아니어도 검증 스킵 가능
+    state.current_phase = Phase.DOC_IMPL
+    state.compile_attempts = 0
+    state.error_history = []
+    state.is_paused = False
+    state.add_log(f"⚡ 검증 스킵 - Phase 5 (문서 구현)로 진행")
+    state.mark_active("검증 스킵 모드")
+    state.save(Path("./output"))
+
+    # Background: Continue workflow
+    def continue_workflow():
+        current_state = WorkflowState.load(project_name, Path("./output"))
+        if current_state is None:
+            return
+
+        try:
+            from agent.agent import run_workflow
+            updated_state = run_workflow(current_state)
+            updated_state.mark_inactive()
+            updated_state.save(Path("./output"))
+        except Exception as e:
+            print(f"❌ Skip validation error: {e}")
+
+    background_tasks.add_task(continue_workflow)
+
+    return {
+        "project_name": project_name,
+        "status": "skipping_validation",
+        "message": "Skipping validation, proceeding to document generation"
     }
 
 @app.post("/api/project/{project_name}/abort")
