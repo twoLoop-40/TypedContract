@@ -11,6 +11,13 @@
         "/Users/joonho/Idris2Projects/TypedContract/Spec"
       ],
       "description": "TypedContract file system access for output, domains, pipelines, and specifications"
+    },
+    "idris2-helper": {
+      "command": "python",
+      "args": [
+        "/Users/joonho/Idris2Projects/TypedContract/mcp-servers/idris2-mcp/server.py"
+      ],
+      "description": "Idris2 type-checking, syntax validation, error explanation, and code generation tools"
     }
   }
 }
