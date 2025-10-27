@@ -1,143 +1,70 @@
 # Idris2 MCP Server
 
-A Model Context Protocol (MCP) server that provides Idris2 type-checking, syntax validation, error explanation, and code generation tools.
+MCP (Model Context Protocol) server for Idris2 type-checking, syntax validation, and code generation assistance.
 
-## Features
+## 🚨 CRITICAL: Code Generation Rules
 
-### 🔧 Tools
+**Before generating any Idris2 code, be aware of these parser constraints**:
 
-1. **check_idris2**
-   - Type-check Idris2 code
-   - Returns compiler output with success/failure status
-   - Timeout: 30 seconds
+### 1. Short Parameter Names (MOST IMPORTANT!)
+```idris
+-- ❌ FAILS: Long names with 3+ params → Parser Error
+data Expense : Type where
+  MkExpense : (govSupport : Nat) -> (cashMatch : Nat) -> (inKindMatch : Nat) -> Expense
 
-2. **explain_error**
-   - Explains Idris2 compiler errors in plain language
-   - Provides common fixes and suggestions
-   - Handles most common error patterns
+-- ✅ WORKS: Short names (≤8 chars)
+data Expense : Type where
+  MkExpense : (gov : Nat) -> (cash : Nat) -> (inKind : Nat) -> Expense
+```
 
-3. **get_template**
-   - Generates Idris2 code templates
-   - Supports: record, data, interface, proof, smart_constructor
-   - Customizable with name parameter
+**Why**: Idris2 parser fails when data constructors have 3+ parameters with long names (>8 characters) on one line.
 
-4. **validate_syntax**
-   - Quick syntax validation without full type-checking
-   - Checks for common syntax issues
-   - Detects unmatched parentheses, missing type signatures, etc.
+### 2. Use Operators, Not Functions
+```idris
+-- ❌ FAILS: plus/minus don't exist in Prelude
+(pf : total = plus supply vat)
 
-5. **suggest_fix**
-   - Suggests fixes for common Idris2 errors
-   - Provides step-by-step suggestions
-   - Context-aware recommendations
+-- ✅ WORKS: Use operators
+(pf : total = supply + vat)
+```
+
+### 3. One-Line Declarations Preferred
+Multi-line indentation can cause parser errors. Prefer one-line declarations.
+
+**Reference**: See `idris2://guidelines` resource or `docs/IDRIS2_CODE_GENERATION_GUIDELINES.md` for full details.
+
+## Resources
+
+### `idris2://guidelines`
+Comprehensive Idris2 code generation guidelines document - **READ THIS FIRST!**
+
+## Tools
+
+1. **check_idris2** - Type-check Idris2 code
+2. **explain_error** - Plain language error explanations
+3. **get_template** - Generate code templates
+4. **validate_syntax** - Quick syntax validation
+5. **suggest_fix** - Intelligent error fix suggestions (includes parser error detection)
 
 ## Installation
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Make server executable
-chmod +x server.py
-```
-
-## Configuration
-
-Add to your MCP configuration (e.g., `claude_desktop_config.json`):
-
+Add to `.mcp-config.json`:
 ```json
 {
   "mcpServers": {
     "idris2-helper": {
       "command": "python",
-      "args": [
-        "/Users/joonho/Idris2Projects/TypedContract/mcp-servers/idris2-mcp/server.py"
-      ]
+      "args": ["/path/to/mcp-servers/idris2-mcp/server.py"],
+      "description": "Idris2 type-checking and code generation tools"
     }
   }
 }
 ```
 
-## Usage Examples
+## Related Resources
 
-### Type-checking code
+- Guidelines: `docs/IDRIS2_CODE_GENERATION_GUIDELINES.md`
+- Skill: `~/.claude/skills/formal-spec-driven-dev/skill.md`
+- Project: `CLAUDE.md`
 
-```json
-{
-  "tool": "check_idris2",
-  "arguments": {
-    "code": "module Domains.Test\n\ndata Foo : Type where\n  MkFoo : Foo",
-    "module_name": "Domains.Test"
-  }
-}
-```
-
-### Getting a template
-
-```json
-{
-  "tool": "get_template",
-  "arguments": {
-    "pattern": "record",
-    "name": "MyContract"
-  }
-}
-```
-
-### Explaining an error
-
-```json
-{
-  "tool": "explain_error",
-  "arguments": {
-    "error_message": "Error: Expected a type declaration."
-  }
-}
-```
-
-## Requirements
-
-- Python 3.10+
-- Idris2 installed and available in PATH
-- MCP Python SDK
-
-## Integration with TypedContract
-
-This MCP server is specifically designed for the TypedContract project to:
-- Validate generated Idris2 code before compilation
-- Provide better error messages to Claude during code generation
-- Offer templates for common contract patterns
-- Speed up the development cycle with quick syntax checks
-
-## Development
-
-### Testing locally
-
-```bash
-# Run the server
-python server.py
-
-# In another terminal, test with MCP inspector
-npx @modelcontextprotocol/inspector python server.py
-```
-
-### Adding new tools
-
-1. Add tool definition to `handle_list_tools()`
-2. Add tool handler to `handle_call_tool()`
-3. Implement the tool function
-4. Update README with usage examples
-
-## Error Patterns Supported
-
-- "Expected a type declaration"
-- "Can't solve constraint"
-- "Undefined name"
-- "Type mismatch"
-- "Can't find import"
-- "Parse error"
-- And more...
-
-## License
-
-Part of the TypedContract project.
+**Version**: 1.0.0 | **Updated**: 2025-10-27

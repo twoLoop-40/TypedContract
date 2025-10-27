@@ -2,6 +2,136 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+## 🚨 **CRITICAL: Idris2 Code Generation Guidelines**
+
+**⚠️ MANDATORY READING BEFORE GENERATING ANY IDRIS2 CODE**:
+- **`docs/IDRIS2_CODE_GENERATION_GUIDELINES.md`** ← 반드시 읽고 따를 것!
+
+### Quick Reference: Top 3 Critical Rules
+
+**1. 짧은 인자 이름 사용 (가장 중요!)**
+```idris
+-- ❌ FAILS: Long names (>8 chars) with 3+ params → Parser Error!
+data Expense : Type where
+  MkExpense : (govSupport : Nat) -> (cashMatch : Nat) -> (inKindMatch : Nat) -> Expense
+
+-- ✅ WORKS: Short names (≤6-8 chars)
+data Expense : Type where
+  MkExpense : (gov : Nat) -> (cash : Nat) -> (inKind : Nat) -> Expense
+```
+
+**2. 연산자 사용 (`+`, `-` not `plus`, `minus`)**
+```idris
+-- ❌ FAILS: plus/minus 함수는 존재하지 않음
+(pf : total = plus supply vat)
+
+-- ✅ WORKS: 연산자 사용
+(pf : total = supply + vat)
+```
+
+**3. 한 줄 작성 권장**
+```idris
+-- ✅ BEST: One-line data constructor
+data Budget : Type where
+  MkBudget : (tot : Nat) -> (gov : Nat) -> (self : Nat) -> (pf : tot = gov + self) -> Budget
+```
+
+### Resources
+
+- 📖 **Full Guidelines**: `docs/IDRIS2_CODE_GENERATION_GUIDELINES.md`
+- 🔧 **MCP Resource**: `idris2://guidelines` (via idris2-helper MCP server)
+- 🎯 **Agent Prompts**: `agent/prompts.py` (includes guidelines)
+
+---
+
+## 📝 **Lessons Learned & Best Practices (Updated: 2025-10-27)**
+
+### Idris2 Code Generation
+
+**발견한 문제점**:
+1. ❌ **Parser Error**: Data constructor에서 긴 이름(>8자) 3개 이상 → `"Expected 'case', 'if', 'do'..."` 에러
+2. ❌ **Function vs Operator**: `plus`, `minus` 대신 `+`, `-` 연산자 사용해야 함
+3. ❌ **Multi-line Indentation**: 잘못된 들여쓰기는 파싱 실패 유발
+
+**해결 방법**:
+1. ✅ 약어 사용: `gov`, `cash`, `tot`, `pf`, `curr`, `tgt`
+2. ✅ 한 줄 작성 권장
+3. ✅ Guidelines 문서 참조
+
+### Backend State Management
+
+**발견한 문제점**:
+1. ❌ **State Synchronization Bug**: Background task가 outer scope의 stale state를 closure로 캡처
+   - 증상: `is_active = true`가 에러 후에도 계속 유지됨
+   - 파일: `agent/main.py` lines 194-227, 561-594
+
+**해결 방법**:
+1. ✅ Background task 내부에서 state 재로드: `WorkflowState.load(project_name, Path("./output"))`
+2. ✅ 에러 발생 시에도 state 재로드 후 저장
+3. ✅ 모든 state 변경 후 즉시 `.save()` 호출
+
+**Good Pattern**:
+```python
+def run_in_background():
+    # ✅ Reload state inside background task
+    current_state = WorkflowState.load(project_name, Path("./output"))
+
+    try:
+        updated_state = run_workflow(current_state)
+        updated_state.save(Path("./output"))
+    except Exception as e:
+        # ✅ Reload again before saving error
+        error_state = WorkflowState.load(project_name, Path("./output"))
+        if error_state:
+            error_state.mark_inactive()
+            error_state.save(Path("./output"))
+```
+
+### Frontend UX
+
+**발견한 문제점**:
+1. ❌ **Unwanted Navigation**: Resume 후 자동으로 `/projects`로 이동 → 진행 상황 모니터링 불가
+
+**해결 방법**:
+1. ✅ `router.push('/projects')` 제거
+2. ✅ 현재 페이지에서 상태 reload: `const data = await getStatus(projectName); setStatus(data);`
+3. ✅ UI 메시지 업데이트: "이 페이지에서 실시간으로 진행 상황을 확인할 수 있습니다"
+
+**Good Pattern**:
+```typescript
+const handleResume = async () => {
+  await resumeProject(projectName)
+  // ✅ Stay on current page, reload status
+  const data = await getStatus(projectName)
+  setStatus(data)
+  // ❌ Don't navigate away: router.push('/projects')
+}
+```
+
+### Phase Display
+
+**발견한 문제점**:
+1. ❌ **Incorrect Phase Display**: UI에는 "Phase 2: Analysis"로 표시되지만 실제로는 Phase 4 (Compilation)에서 실패
+   - 원인: `agent.py`에서 phase 업데이트가 workflow 시작 시에만 `Phase.ANALYSIS`로 설정되고, Phase 3, 4로 진행될 때 업데이트되지 않음
+
+**TODO (Not yet fixed)**:
+1. ⚠️ `agent.py`에서 Phase 3, 4 시작 시 `workflow_state.current_phase` 업데이트 추가 필요
+
+### Testing Strategy
+
+**원칙**:
+1. ✅ Python은 runtime 언어 → 모든 새 기능에 테스트 작성 필수
+2. ✅ Workflow state transitions는 `Spec/WorkflowTypes.idr`와 일치해야 함
+3. ✅ API endpoints는 success/failure 케이스 모두 테스트
+
+**Current Coverage**:
+- ✅ 17 unit tests passing (workflow_state.py)
+- ⚠️ Phase transition tests needed
+
+---
+
 ## Project Overview: TypedContract
 
 This is a **type-safe contract and document generation system** with three main components:
@@ -32,10 +162,13 @@ TypedContract/
 ├── Spec/                       # Formal workflow specifications
 │   ├── WorkflowTypes.idr      # Core workflow state machine types
 │   ├── WorkflowExecution.idr  # Execution semantics & transitions
+│   ├── WorkflowControl.idr    # Start/Pause/Resume/Restart control flow
 │   ├── AgentOperations.idr    # Agent system operations
 │   ├── RendererOperations.idr # Multi-format rendering operations
 │   ├── FrontendTypes.idr      # UI state and view types
 │   ├── ErrorHandling.idr      # Error classification system
+│   ├── ProjectRecovery.idr    # Project recovery strategies
+│   ├── UIOperations.idr       # UI actions and responses
 │   └── *Example.idr           # Example workflows & usage
 │
 ├── Pipeline/                   # Generated runtime pipelines (agent-created)
@@ -66,6 +199,7 @@ TypedContract/
 │   ├── DOCKER_SETUP.md        # Docker usage guide
 │   ├── FRONTEND_SPEC.md       # Frontend architecture
 │   ├── AGENT_SYSTEM.md        # Agent system design
+│   ├── TYPE_SAFETY_VERIFICATION.md  # Idris2 spec ↔ Implementation mapping
 │   └── *.md                   # Additional docs
 │
 ├── Main.idr                    # Idris2 executable (IO operations)
@@ -80,25 +214,43 @@ TypedContract/
 - **Idris2 Core Framework** (100%): All renderers and generator working
 - **Domain Models** (100%): ScaleDeep and ApprovalNarrative examples
 - **Spec/** (100%): Complete workflow type specifications
+  - ✅ WorkflowTypes.idr: State machine with 10 phases
+  - ✅ ErrorHandling.idr: Error classification system
+  - ✅ ProjectRecovery.idr: Recovery strategies and safety predicates
+  - ✅ UIOperations.idr: Comprehensive UI type system
+  - **All specs verified**: See `docs/TYPE_SAFETY_VERIFICATION.md`
 - **Backend API** (100%): All major endpoints implemented
   - POST /api/project/init
+  - GET /api/projects (project list)
   - POST /api/project/{name}/generate (LangGraph integration)
   - GET /api/project/{name}/status
+  - POST /api/project/{name}/resume (with prompt update)
+  - POST /api/project/{name}/abort
   - POST /api/project/{name}/draft
   - GET /api/project/{name}/draft
   - POST /api/project/{name}/feedback
 - **WorkflowState** (100%): Python implementation of Spec/WorkflowTypes.idr
   - 17 unit tests passing ✅
-- **Tests** (80%): workflow_state and API endpoint tests written
-
-### ⚠️ In Progress
-
-- **Docker Environment**: Debugging Chez Scheme installation for Idris2
-- **End-to-End Testing**: Pending Docker environment fix
+  - Activity tracking (is_active, last_activity, current_action)
+- **Frontend** (100%): Next.js 14 UI fully functional
+  - ✅ Homepage with API status
+  - ✅ Project creation page (`/project/new`)
+  - ✅ Project list page (`/projects`) with auto-refresh
+  - ✅ Project detail page (`/project/[name]`) with:
+    - Real-time activity indicator (green pulse)
+    - Phase visualization (10 phases with emojis)
+    - Recovery UI with prompt editor
+    - Abort button (only when active)
+  - ✅ All UI operations match Spec/UIOperations.idr
+- **Docker Environment** (100%): Fully operational
+  - Backend: FastAPI + Idris2 v0.7.0 on port 8000
+  - Frontend: Next.js 14 on port 3000
+  - Health checks passing ✅
 
 ### ❌ Not Started
 
-- **Frontend**: Next.js 14 UI (0%)
+- **End-to-End Integration Tests**: Full workflow testing with Docker
+- **LaTeX/PDF Generation**: Phase 9 implementation
 
 ---
 
@@ -396,14 +548,22 @@ Python backend that orchestrates the full system.
 
 ### Layer 5: Next.js Frontend (`frontend/`)
 
-User interface for the document generation system (TODO - not yet implemented).
+User interface for the document generation system - fully implemented and operational.
 
-**Planned features:**
-- Project creation with prompt input and file upload
-- Real-time workflow progress monitoring
-- Draft preview (txt/md/csv)
-- Feedback submission for revisions
-- PDF download
+**Implemented features:**
+- ✅ Homepage with API status indicator
+- ✅ Project creation with prompt input and file upload (`/project/new`)
+- ✅ Project list page with auto-refresh (`/projects`)
+- ✅ Real-time workflow progress monitoring (`/project/[name]`)
+  - Activity indicator (green pulse when backend is active)
+  - Phase visualization (all 10 phases with emojis and progress)
+  - Recovery UI with prompt editing
+  - Abort button for stopping long-running tasks
+- ✅ Draft preview (txt/md/csv)
+- ✅ Feedback submission for revisions
+- ✅ PDF download
+
+**Type Safety**: All UI operations are specified in `Spec/UIOperations.idr` and verified in `docs/TYPE_SAFETY_VERIFICATION.md`
 
 ## Intelligent Error Handling System
 

@@ -188,6 +188,45 @@ example{{DocumentName}} = Mk{{DocumentName}}
 7. ❌ IO 작업 금지 (순수 타입만)
 8. ❌ String은 검증 없이 사용 가능 (Date 타입은 나중에)
 
+## **CRITICAL: Idris2 Parser 제약사항 (꼭 지켜야 함)**
+
+**1. 짧은 인자 이름 사용 (가장 중요!)**
+- Data constructor 인자 이름은 최대 6-8자 이내로 짧게
+- 긴 이름을 한 줄에 3개 이상 나열하면 parser가 실패합니다!
+
+❌ **실패하는 코드** (긴 이름):
+```idris
+data ExpenseItemAmount : Type where
+  MkExpenseItemAmount : (govSupport : Nat) -> (cashMatch : Nat) -> (inKindMatch : Nat) -> ExpenseItemAmount
+  -- Parser Error!
+```
+
+✅ **올바른 코드** (짧은 이름):
+```idris
+data ExpenseItemAmount : Type where
+  MkExpenseItemAmount : (gov : Nat) -> (cash : Nat) -> (inKind : Nat) -> ExpenseItemAmount
+  -- OK!
+```
+
+**2. 연산자 사용**
+- `plus`, `minus` 함수 대신 `+`, `-` 연산자 사용
+- ❌ `(pf : total = plus supply vat)`
+- ✅ `(pf : total = supply + vat)`
+
+**3. 한 줄 작성 권장**
+- Data constructor와 smart constructor는 가능한 한 한 줄로
+- Multi-line 들여쓰기는 parser에 문제를 일으킬 수 있음
+
+✅ **권장 패턴**:
+```idris
+data TotalBudget : Type where
+  MkTotal : (tot : Nat) -> (gov : Nat) -> (self : Nat) -> (pf : tot = gov + self) -> TotalBudget
+
+public export
+mkTotal : (t : Nat) -> (g : Nat) -> (s : Nat) -> {auto prf : t = g + s} -> TotalBudget
+mkTotal t g s {prf} = MkTotal t g s prf
+```
+
 ## 참고 예제
 
 ```idris
@@ -265,6 +304,25 @@ FIX_ERROR_PROMPT = """다음 Idris2 코드에 컴파일 에러가 발생했습�
 
 7. **"Can't solve constraint"**
    → 증명이 자동으로 안됨, Refl 대신 수동 증명 필요
+
+8. **"Expected 'case', 'if', 'do', application or operator expression" in data constructor**
+   → data 생성자 정의에서 파라미터 구문 오류
+   → 올바른 형식:
+   ```idris
+   data MyType : Type where
+     MkMyType : (field1 : Nat)
+             -> (field2 : String)
+             -> (proof : field1 = 10)  -- 마지막 파라미터도 -> 사용
+             -> MyType                  -- 반환 타입
+   ```
+   → 잘못된 형식 (괄호나 화살표 누락):
+   ```idris
+   data MyType : Type where
+     MkMyType : (field1 : Nat)
+             -> (field2 : String)
+             -> (proof : field1 = 10)  -- 여기까지는 맞음
+             MyType                     -- 틀림! -> 없음
+   ```
 
 ## 수정 지침
 

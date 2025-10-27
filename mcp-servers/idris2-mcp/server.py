@@ -24,6 +24,38 @@ from mcp.types import (
 # Initialize MCP server
 server = Server("idris2-helper")
 
+# Path to guidelines document
+GUIDELINES_PATH = Path(__file__).parent.parent.parent / "docs" / "IDRIS2_CODE_GENERATION_GUIDELINES.md"
+
+# ============================================================================
+# Resources
+# ============================================================================
+
+@server.list_resources()
+async def handle_list_resources() -> list[Resource]:
+    """List available resources"""
+    return [
+        Resource(
+            uri="idris2://guidelines",
+            name="Idris2 Code Generation Guidelines",
+            description="Best practices and critical rules for generating Idris2 code",
+            mimeType="text/markdown"
+        )
+    ]
+
+
+@server.read_resource()
+async def handle_read_resource(uri: str) -> str:
+    """Read resource content"""
+    if uri == "idris2://guidelines":
+        if GUIDELINES_PATH.exists():
+            return GUIDELINES_PATH.read_text(encoding='utf-8')
+        else:
+            return "Guidelines not found. Please check the file path."
+    else:
+        raise ValueError(f"Unknown resource: {uri}")
+
+
 # ============================================================================
 # Tools
 # ============================================================================
@@ -298,21 +330,36 @@ async def suggest_idris2_fix(args: dict) -> list[TextContent]:
 
     suggestions = []
 
-    if "Expected a type declaration" in error_msg:
+    # ⚠️ CRITICAL: Parser errors from long parameter names
+    if "Expected 'case', 'if', 'do', application or operator expression" in error_msg:
+        suggestions.append("🚨 CRITICAL: This is likely caused by LONG PARAMETER NAMES in data constructors!")
+        suggestions.append("Idris2 parser fails when 3+ parameters with long names (>8 chars) are on one line")
+        suggestions.append("FIX: Shorten parameter names to 6-8 characters or less")
+        suggestions.append("Example: Change (govSupport : Nat) -> (cashMatch : Nat) -> (inKindMatch : Nat)")
+        suggestions.append("     To: (gov : Nat) -> (cash : Nat) -> (inKind : Nat)")
+        suggestions.append("📖 See: idris2://guidelines resource for full details")
+
+    elif "Expected a type declaration" in error_msg:
         suggestions.append("Add a type signature before the constructor in 'data' declarations")
         suggestions.append("Example: data MyType : Type where")
+        suggestions.append("OR: Check if the line above has syntax issues (unmatched parens, long names)")
 
-    if "Undefined name" in error_msg:
+    elif "Can't find name plus" in error_msg or "Can't find name minus" in error_msg:
+        suggestions.append("Use operators (+, -, *, /) instead of function names (plus, minus, mult)")
+        suggestions.append("Example: Change (pf : total = plus supply vat) to (pf : total = supply + vat)")
+
+    elif "Undefined name" in error_msg:
         suggestions.append("Check if you've imported the required module")
         suggestions.append("Verify the spelling of the identifier")
 
-    if "Type mismatch" in error_msg:
+    elif "Type mismatch" in error_msg:
         suggestions.append("Check that your types align correctly")
         suggestions.append("Use :t in REPL to check inferred types")
 
     if not suggestions:
         suggestions.append("Try breaking down complex type signatures")
-        suggestions.append("Check the Idris2 documentation for similar examples")
+        suggestions.append("Check idris2://guidelines resource for common patterns")
+        suggestions.append("Ensure parameter names are SHORT (6-8 chars max)")
 
     response = f"""## Suggested Fixes
 
@@ -328,6 +375,8 @@ async def suggest_idris2_fix(args: dict) -> list[TextContent]:
 ```idris
 {code[:200]}...
 ```
+
+💡 **Tip**: Read the `idris2://guidelines` resource for comprehensive Idris2 code generation rules!
 """
 
     return [TextContent(type="text", text=response)]

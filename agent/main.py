@@ -53,15 +53,24 @@ class GenerationStatus(BaseModel):
     current_phase: str
     progress: float
     completed: bool
+    is_active: bool = False  # 백엔드가 현재 작업 중인지 여부
+    last_activity: Optional[str] = None  # 마지막 활동 시간 (ISO format)
+    current_action: Optional[str] = None  # 현재 수행 중인 작업 설명
+    user_prompt: Optional[str] = None  # 원래 사용자 프롬프트
     error: Optional[str] = None
     classified_error: Optional[dict] = None  # ClassifiedError
     error_strategy: Optional[str] = None
+    error_suggestion: Optional[dict] = None  # 동일 에러 3회 시 사용자 제안
     available_actions: Optional[List[str]] = None
     logs: List[str] = []  # 실시간 로그 (최근 100개)
 
 class FeedbackRequest(BaseModel):
     project_name: str
     feedback: str
+
+class ResumeRequest(BaseModel):
+    updated_prompt: Optional[str] = None  # 수정된 프롬프트 (선택)
+    restart_from_analysis: bool = False    # 분석부터 다시 시작할지
 
 class DraftResponse(BaseModel):
     project_name: str
@@ -183,10 +192,16 @@ async def generate_spec(project_name: str, background_tasks: BackgroundTasks):
 
     # 백그라운드에서 LangGraph 실행
     def run_generation():
+        # 백그라운드에서 state를 다시 로드하여 동기화 문제 방지
+        current_state = WorkflowState.load(project_name, Path("./output"))
+        if current_state is None:
+            print(f"❌ State not found for {project_name}")
+            return
+
         try:
             # Phase 2-5: LangGraph agent 실행
             print(f"\n🚀 Starting workflow for {project_name}...")
-            updated_state = run_workflow(state)
+            updated_state = run_workflow(current_state)
 
             # 상태 저장
             print(f"\n💾 Saving workflow state...")
@@ -203,9 +218,13 @@ async def generate_spec(project_name: str, background_tasks: BackgroundTasks):
             print(f"   Traceback:")
             traceback.print_exc()
 
-            state.compile_result = CompileResult(success=False, error_msg=error_msg)
-            state.add_log(f"❌ 워크플로우 에러: {str(e)}")
-            state.save(Path("./output"))
+            # 에러 발생 시 최신 state를 다시 로드하여 저장
+            error_state = WorkflowState.load(project_name, Path("./output"))
+            if error_state:
+                error_state.compile_result = CompileResult(success=False, error_msg=error_msg)
+                error_state.add_log(f"❌ 워크플로우 에러: {str(e)}")
+                error_state.mark_inactive()
+                error_state.save(Path("./output"))
 
     background_tasks.add_task(run_generation)
 
@@ -216,6 +235,45 @@ async def generate_spec(project_name: str, background_tasks: BackgroundTasks):
         "current_phase": str(state.current_phase),
         "message": "Idris2 generation started. Poll /api/project/{name}/status for progress."
     }
+
+@app.get("/api/projects")
+async def list_projects():
+    """
+    List all projects with their status
+
+    Returns:
+        List of project summaries with status
+    """
+    output_dir = Path("./output")
+    projects = []
+
+    if not output_dir.exists():
+        return {"projects": []}
+
+    # Iterate through output directory
+    for project_dir in output_dir.iterdir():
+        if project_dir.is_dir() and (project_dir / "workflow_state.json").exists():
+            try:
+                state = WorkflowState.load(project_dir.name, output_dir)
+                if state:
+                    projects.append({
+                        "project_name": state.project_name,
+                        "current_phase": str(state.current_phase),
+                        "progress": state.progress(),
+                        "completed": state.completed,
+                        "has_error": state.compile_result is not None and not state.compile_result.success,
+                        "version": state.version,
+                        "is_active": state.is_active,
+                        "last_activity": state.last_activity
+                    })
+            except Exception as e:
+                print(f"Error loading project {project_dir.name}: {e}")
+                continue
+
+    # Sort by last activity (most recent first)
+    projects.sort(key=lambda p: p.get("last_activity") or "", reverse=True)
+
+    return {"projects": projects}
 
 @app.get("/api/project/{project_name}/status")
 async def get_status(project_name: str) -> GenerationStatus:
@@ -238,6 +296,7 @@ async def get_status(project_name: str) -> GenerationStatus:
     error_msg = None
     classified_error = None
     error_strategy = None
+    error_suggestion = None
     available_actions = None
 
     if state.compile_result and not state.compile_result.success:
@@ -248,14 +307,23 @@ async def get_status(project_name: str) -> GenerationStatus:
         error_strategy = state.error_strategy
         available_actions = state.classified_error.get("available_actions", [])
 
+    # 에러 제안 (동일 에러 3회 반복 시)
+    if state.error_suggestion:
+        error_suggestion = state.error_suggestion
+
     return GenerationStatus(
         project_name=project_name,
         current_phase=str(state.current_phase),
         progress=state.progress(),
         completed=state.workflow_complete(),
+        is_active=state.is_active,
+        last_activity=state.last_activity,
+        current_action=state.current_action,
+        user_prompt=state.user_prompt,  # 원래 프롬프트 반환
         error=error_msg,
         classified_error=classified_error,
         error_strategy=error_strategy,
+        error_suggestion=error_suggestion,  # 에러 제안 추가
         available_actions=available_actions,
         logs=state.logs  # 실시간 로그 반환
     )
@@ -444,6 +512,133 @@ async def submit_feedback(project_name: str, request: FeedbackRequest, backgroun
         "version": state.version_string(),
         "current_phase": str(state.current_phase),
         "message": f"Regenerating specification with feedback (version {state.version_string()})"
+    }
+
+class ResumeRequest(BaseModel):
+    updated_prompt: Optional[str] = None  # 수정된 프롬프트 (선택)
+    restart_from_analysis: bool = False    # 분석부터 다시 시작할지
+
+@app.post("/api/project/{project_name}/resume")
+async def resume_project(
+    project_name: str,
+    request: ResumeRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Resume a failed project with optional prompt update
+
+    Implements Spec/ProjectRecovery.idr recovery strategies:
+    - RetryPhase: Retry the current phase (default)
+    - RestartFromAnalysis: Go back to Phase 2 (if restart_from_analysis=true)
+    - UpdatePrompt: Update prompt and restart from analysis
+    """
+    # Load state
+    state = WorkflowState.load(project_name, Path("./output"))
+
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    # Check if resume is safe
+    if state.completed:
+        raise HTTPException(status_code=400, detail="Project already completed")
+
+    if state.current_phase == Phase.INPUT:
+        raise HTTPException(status_code=400, detail="No work to resume from input phase")
+
+    # 프롬프트 업데이트가 있으면 적용
+    if request.updated_prompt:
+        state.user_prompt = request.updated_prompt
+        state.add_log(f"📝 프롬프트 업데이트됨")
+        # 프롬프트가 바뀌면 분석부터 다시
+        request.restart_from_analysis = True
+
+    # 분석부터 재시작하는 경우
+    if request.restart_from_analysis:
+        state.current_phase = Phase.ANALYSIS
+        state.analysis_result = None
+        state.spec_code = None
+        state.compile_attempts = 0
+        state.add_log("🔄 Phase 2 (분석)부터 재시작")
+
+    # Reset error state
+    state.compile_result = None
+    state.classified_error = None
+    state.error_strategy = None
+    state.mark_active("프로젝트 재개 중...")
+    state.save(Path("./output"))
+
+    # Background: Resume workflow
+    def resume_workflow():
+        # 백그라운드에서 state를 다시 로드하여 동기화 문제 방지
+        current_state = WorkflowState.load(project_name, Path("./output"))
+        if current_state is None:
+            print(f"❌ State not found for {project_name}")
+            return
+
+        try:
+            print(f"\n🔄 Resuming workflow for {project_name}...")
+            current_state.add_log("🔄 프로젝트 재개")
+
+            # Run workflow from current phase
+            from agent.agent import run_workflow
+            updated_state = run_workflow(current_state)
+
+            updated_state.mark_inactive()
+            updated_state.save(Path("./output"))
+            print(f"\n✅ Resume completed!")
+
+        except Exception as e:
+            import traceback
+            error_msg = f"Resume error: {str(e)}"
+            print(f"\n❌ ERROR in resume:")
+            print(f"   Project: {project_name}")
+            print(f"   Error: {error_msg}")
+            traceback.print_exc()
+
+            # 에러 발생 시 최신 state를 다시 로드하여 저장
+            error_state = WorkflowState.load(project_name, Path("./output"))
+            if error_state:
+                error_state.compile_result = CompileResult(success=False, error_msg=error_msg)
+                error_state.add_log(f"❌ 재개 실패: {str(e)}")
+                error_state.mark_inactive()
+                error_state.save(Path("./output"))
+
+    background_tasks.add_task(resume_workflow)
+
+    return {
+        "project_name": project_name,
+        "status": "resuming",
+        "message": "Project resume started"
+    }
+
+@app.post("/api/project/{project_name}/abort")
+async def abort_project(project_name: str):
+    """
+    Abort a running project execution
+
+    Implements Spec/ProjectRecovery.idr AbortExecution action:
+    - Marks project as inactive
+    - Preserves current state for later resume
+    """
+    # Load state
+    state = WorkflowState.load(project_name, Path("./output"))
+
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    if not state.is_active:
+        raise HTTPException(status_code=400, detail="Project is not currently running")
+
+    # Mark as inactive
+    state.mark_inactive()
+    state.add_log("⏸️ 사용자가 실행을 중단했습니다")
+    state.save(Path("./output"))
+
+    return {
+        "project_name": project_name,
+        "status": "aborted",
+        "message": "Project execution has been stopped. You can resume it later.",
+        "current_phase": str(state.current_phase)
     }
 
 @app.post("/api/project/{project_name}/finalize")

@@ -1,17 +1,24 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getStatus, getDraft, submitFeedback, generateDraft, finalizePDF, downloadPDF } from '@/lib/api'
+import { useRouter } from 'next/navigation'
+import { getStatus, getDraft, submitFeedback, generateDraft, finalizePDF, downloadPDF, resumeProject, abortProject } from '@/lib/api'
 import type { WorkflowStatus, DraftResponse } from '@/types/workflow'
 
 export default function ProjectPage({ params }: { params: { name: string } }) {
   const projectName = params.name
+  const router = useRouter()
 
   const [status, setStatus] = useState<WorkflowStatus | null>(null)
   const [draft, setDraft] = useState<DraftResponse | null>(null)
   const [feedback, setFeedback] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Recovery state
+  const [showRecoveryUI, setShowRecoveryUI] = useState(false)
+  const [updatedPrompt, setUpdatedPrompt] = useState('')
+  const [restartFromAnalysis, setRestartFromAnalysis] = useState(false)
 
   // Poll status every 3 seconds
   useEffect(() => {
@@ -83,6 +90,52 @@ export default function ProjectPage({ params }: { params: { name: string } }) {
     }
   }
 
+  const handleResume = async (withPromptUpdate: boolean = false) => {
+    try {
+      if (withPromptUpdate) {
+        // 프롬프트 수정하는 경우
+        await resumeProject(projectName, updatedPrompt || undefined, restartFromAnalysis)
+        alert('🔄 프롬프트가 수정되었습니다. 백그라운드에서 재생성이 시작됩니다.')
+      } else {
+        // 그냥 재시도
+        await resumeProject(projectName)
+        alert('🔄 프로젝트 재시도가 시작되었습니다. 백그라운드에서 계속 진행됩니다.')
+      }
+
+      // Stay on current page to monitor progress (removed router.push('/projects'))
+      // User can manually navigate back using "← 프로젝트 목록" button
+
+      // Reload status immediately to show updated state
+      const data = await getStatus(projectName)
+      setStatus(data)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message)
+    }
+  }
+
+  const handleAbort = async () => {
+    if (!confirm('⏸️ 정말로 실행을 중단하시겠습니까?\n\n중단 후에도 나중에 다시 재개할 수 있습니다.')) {
+      return
+    }
+
+    try {
+      await abortProject(projectName)
+      alert('⏸️ 프로젝트 실행이 중단되었습니다.')
+      // Reload status
+      const data = await getStatus(projectName)
+      setStatus(data)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message)
+    }
+  }
+
+  // Initialize updated prompt when showing recovery UI
+  useEffect(() => {
+    if (showRecoveryUI && status?.user_prompt) {
+      setUpdatedPrompt(status.user_prompt)
+    }
+  }, [showRecoveryUI, status?.user_prompt])
+
   if (loading) {
     return (
       <div className="text-center py-12">
@@ -107,14 +160,55 @@ export default function ProjectPage({ params }: { params: { name: string } }) {
     <div className="space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">{projectName}</h1>
-        <div className="text-sm text-gray-500">
-          {status.completed ? '✅ 완료' : '🔄 진행 중'}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push('/projects')}
+            className="btn btn-secondary text-sm"
+          >
+            ← 프로젝트 목록
+          </button>
+          {status.is_active && (
+            <button
+              onClick={handleAbort}
+              className="btn btn-secondary text-sm"
+            >
+              ⏸️ 중단
+            </button>
+          )}
+          <div className="text-sm text-gray-500">
+            {status.completed ? '✅ 완료' : status.is_active ? '🔄 진행 중' : '⏸️ 대기 중'}
+          </div>
         </div>
       </div>
 
       {/* Progress Bar */}
       <div className="card">
         <h2 className="text-xl font-semibold mb-4">진행 상황</h2>
+
+        {/* Backend Activity Indicator */}
+        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full ${
+              status.is_active ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
+            }`} />
+            <div className="flex-1">
+              <div className="font-medium text-sm">
+                {status.is_active ? '🟢 백엔드 작업 중' : '⚪ 백엔드 대기 중'}
+              </div>
+              {status.current_action && (
+                <div className="text-xs text-gray-600 mt-1">
+                  {status.current_action}
+                </div>
+              )}
+              {status.last_activity && (
+                <div className="text-xs text-gray-500 mt-1">
+                  마지막 활동: {new Date(status.last_activity).toLocaleTimeString('ko-KR')}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="mb-4">
           <div className="flex justify-between text-sm mb-2">
             <div className="flex items-center gap-2">
@@ -151,7 +245,28 @@ export default function ProjectPage({ params }: { params: { name: string } }) {
               <div className="flex-1">
                 <strong className="text-red-800 text-base">Idris2 타입 체크 오류</strong>
                 <p className="text-sm text-red-600 mt-1">
-                  의존 타입 검증 중 오류가 발생했습니다. 에이전트가 자동으로 수정을 시도합니다.
+                  의존 타입 검증 중 오류가 발생했습니다.
+                </p>
+
+                {/* Recovery Actions */}
+                {!status.is_active && (
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      onClick={() => setShowRecoveryUI(!showRecoveryUI)}
+                      className="btn btn-primary text-sm"
+                    >
+                      {showRecoveryUI ? '❌ 취소' : '📝 프롬프트 수정 후 재시도'}
+                    </button>
+                    <button
+                      onClick={() => handleResume(false)}
+                      className="btn btn-secondary text-sm"
+                    >
+                      ⚡ 그냥 재시도
+                    </button>
+                  </div>
+                )}
+                <p className="text-xs text-gray-600 mt-2">
+                  💡 재시도를 시작하면 이 페이지에서 진행 상황을 모니터링할 수 있습니다.
                 </p>
 
                 {/* Error Classification Info */}
@@ -204,8 +319,250 @@ export default function ProjectPage({ params }: { params: { name: string } }) {
 {status.error}
               </pre>
             </details>
+
+            {/* Error Suggestion (동일 에러 3회 반복 시) */}
+            {status.error_suggestion && (
+              <div className="mt-4 p-4 bg-orange-50 border-2 border-orange-400 rounded-lg">
+                <div className="flex items-start gap-2 mb-3">
+                  <span className="text-2xl">⚠️</span>
+                  <div className="flex-1">
+                    <h4 className="font-bold text-orange-900 text-base mb-1">
+                      {status.error_suggestion.message}
+                    </h4>
+                    <p className="text-sm text-orange-700 mb-3">
+                      자동 수정이 어려워 보입니다. 다음 방법을 시도해보세요:
+                    </p>
+                    <ul className="space-y-2 mb-4">
+                      {status.error_suggestion.suggestions.map((suggestion, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-sm text-gray-800">
+                          <span className="text-orange-500 font-bold">{idx + 1}.</span>
+                          <span>{suggestion}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {status.error_suggestion.can_retry && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setShowRecoveryUI(true)}
+                          className="btn btn-primary text-sm"
+                        >
+                          📝 프롬프트 수정하기
+                        </button>
+                        <button
+                          onClick={() => handleResume(false)}
+                          className="btn btn-secondary text-sm"
+                        >
+                          🔄 다시 시도하기
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {status.error_suggestion.error_preview && (
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs text-orange-700 font-medium">
+                      에러 미리보기
+                    </summary>
+                    <pre className="mt-2 text-xs text-orange-800 bg-white p-2 rounded border border-orange-300 overflow-x-auto">
+{status.error_suggestion.error_preview}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* Recovery UI */}
+            {showRecoveryUI && (
+              <div className="mt-4 p-4 bg-white border-2 border-blue-300 rounded-lg">
+                <h4 className="font-bold text-gray-900 mb-3">🛠️ 프롬프트 수정</h4>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    원래 프롬프트:
+                  </label>
+                  <textarea
+                    value={updatedPrompt}
+                    onChange={(e) => setUpdatedPrompt(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm"
+                    rows={8}
+                    placeholder="프롬프트를 수정하세요..."
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    💡 팁: 더 구체적인 정보를 추가하거나, 금액/날짜 등을 명확히 하세요.
+                  </p>
+                </div>
+
+                <div className="mb-4">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={restartFromAnalysis}
+                      onChange={(e) => setRestartFromAnalysis(e.target.checked)}
+                      className="rounded"
+                    />
+                    분석 단계부터 재시작 (Phase 2부터 다시)
+                  </label>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleResume(true)}
+                    className="btn btn-primary"
+                  >
+                    ✅ 수정된 프롬프트로 재시작
+                  </button>
+                  <button
+                    onClick={() => setShowRecoveryUI(false)}
+                    className="btn btn-secondary"
+                  >
+                    취소
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  * 재시작하면 백그라운드에서 작업이 진행되며, 이 페이지에서 모니터링할 수 있습니다.
+                </p>
+              </div>
+            )}
           </div>
         )}
+      </div>
+
+      {/* Resume Button for Paused Projects (no error) */}
+      {!status.completed && !status.is_active && !status.error && status.current_phase !== 'Phase 1: Input Collection' && (
+        <div className="card bg-blue-50 border-2 border-blue-300">
+          <div className="flex items-start gap-3">
+            <span className="text-3xl">⏸️</span>
+            <div className="flex-1">
+              <h3 className="text-lg font-bold text-gray-900 mb-2">프로젝트 대기 중</h3>
+              <p className="text-sm text-gray-700 mb-4">
+                이 프로젝트는 {status.current_phase}에서 멈춰있습니다. 계속 진행하시겠습니까?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleResume(false)}
+                  className="btn btn-primary text-sm"
+                >
+                  🔄 계속 진행하기
+                </button>
+                <button
+                  onClick={() => setShowRecoveryUI(!showRecoveryUI)}
+                  className="btn btn-secondary text-sm"
+                >
+                  📝 프롬프트 수정 후 진행
+                </button>
+              </div>
+              <p className="text-xs text-gray-600 mt-2">
+                💡 진행을 시작하면 이 페이지에서 실시간으로 진행 상황을 확인할 수 있습니다.
+              </p>
+            </div>
+          </div>
+
+          {/* Recovery UI for paused projects */}
+          {showRecoveryUI && (
+            <div className="mt-4 p-4 bg-white border-2 border-blue-300 rounded-lg">
+              <h4 className="font-bold text-gray-900 mb-3">🛠️ 프롬프트 수정</h4>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  프롬프트 수정:
+                </label>
+                <textarea
+                  value={updatedPrompt}
+                  onChange={(e) => setUpdatedPrompt(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg font-mono text-sm"
+                  rows={8}
+                  placeholder="프롬프트를 수정하세요..."
+                />
+              </div>
+
+              <div className="mb-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={restartFromAnalysis}
+                    onChange={(e) => setRestartFromAnalysis(e.target.checked)}
+                    className="rounded"
+                  />
+                  분석 단계부터 재시작 (Phase 2부터 다시)
+                </label>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleResume(true)}
+                  className="btn btn-primary"
+                >
+                  ✅ 수정된 프롬프트로 재시작
+                </button>
+                <button
+                  onClick={() => setShowRecoveryUI(false)}
+                  className="btn btn-secondary"
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Workflow Phase Visualization */}
+      <div className="card">
+        <h2 className="text-xl font-semibold mb-4">워크플로우 단계</h2>
+        <div className="space-y-3">
+          {[
+            { phase: 'Phase 1: Input Collection', emoji: '📥', key: 'Input' },
+            { phase: 'Phase 2: Analysis', emoji: '🔍', key: 'Analysis' },
+            { phase: 'Phase 3: Spec Generation', emoji: '📝', key: 'SpecGeneration' },
+            { phase: 'Phase 4: Compilation', emoji: '⚙️', key: 'Compilation' },
+            { phase: 'Phase 4b: Error Handling', emoji: '🔧', key: 'ErrorHandling' },
+            { phase: 'Phase 5: Document Implementation', emoji: '📄', key: 'DocImpl' },
+            { phase: 'Phase 6: Draft Generation', emoji: '✏️', key: 'Draft' },
+            { phase: 'Phase 7: User Feedback', emoji: '💬', key: 'Feedback' },
+            { phase: 'Phase 8: Refinement', emoji: '🔄', key: 'Refinement' },
+            { phase: 'Phase 9: Finalization', emoji: '✅', key: 'Final' },
+          ].map((item) => {
+            const isCurrent = status.current_phase.includes(item.key) || status.current_phase === item.phase
+            const isCompleted = status.progress > (item.phase.match(/\d+/)?.[0] ? parseInt(item.phase.match(/\d+/)![0]) / 10 : 0)
+
+            return (
+              <div
+                key={item.phase}
+                className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
+                  isCurrent
+                    ? 'border-primary bg-blue-50 shadow-md'
+                    : isCompleted
+                    ? 'border-green-300 bg-green-50'
+                    : 'border-gray-200 bg-gray-50'
+                }`}
+              >
+                <div className={`text-2xl ${isCurrent ? 'animate-bounce' : ''}`}>
+                  {item.emoji}
+                </div>
+                <div className="flex-1">
+                  <div className={`font-medium ${isCurrent ? 'text-primary' : isCompleted ? 'text-green-700' : 'text-gray-600'}`}>
+                    {item.phase}
+                  </div>
+                  {isCurrent && status.current_action && (
+                    <div className="text-xs text-gray-600 mt-1">
+                      {status.current_action}
+                    </div>
+                  )}
+                </div>
+                {isCurrent && (
+                  <div className="text-primary font-bold text-sm">
+                    ← 현재 단계
+                  </div>
+                )}
+                {isCompleted && !isCurrent && (
+                  <div className="text-green-600 text-sm">
+                    ✓
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {/* Draft Section */}
