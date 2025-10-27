@@ -128,13 +128,16 @@ class WorkflowState:
     final_pdf_path: Optional[str] = None
     completed: bool = False
 
+    # 실시간 로그 (프론트엔드 모니터링용)
+    logs: List[str] = field(default_factory=list)  # 최근 100개 로그 유지
+
     # ========================================================================
     # 상태 검증 (Spec/WorkflowTypes.idr의 검증 함수들)
     # ========================================================================
 
     def input_phase_complete(self) -> bool:
         """Phase 1 완료 조건"""
-        return self.user_prompt is not None and len(self.reference_docs) > 0
+        return self.user_prompt is not None  # reference_docs는 optional
 
     def analysis_phase_complete(self) -> bool:
         """Phase 2 완료 조건"""
@@ -175,6 +178,25 @@ class WorkflowState:
     def workflow_complete(self) -> bool:
         """전체 워크플로우 완료 조건"""
         return self.completed and self.current_phase == Phase.FINAL
+
+    # ========================================================================
+    # 로그 관리
+    # ========================================================================
+
+    def add_log(self, message: str) -> None:
+        """
+        로그 메시지 추가 (최근 100개만 유지)
+
+        Args:
+            message: 로그 메시지
+        """
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_entry = f"[{timestamp}] {message}"
+        self.logs.append(log_entry)
+        # 최근 100개만 유지
+        if len(self.logs) > 100:
+            self.logs = self.logs[-100:]
 
     # ========================================================================
     # 상태 전이 (Spec/WorkflowTypes.idr의 전이 함수들)

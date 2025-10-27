@@ -57,6 +57,7 @@ class GenerationStatus(BaseModel):
     classified_error: Optional[dict] = None  # ClassifiedError
     error_strategy: Optional[str] = None
     available_actions: Optional[List[str]] = None
+    logs: List[str] = []  # 실시간 로그 (최근 100개)
 
 class FeedbackRequest(BaseModel):
     project_name: str
@@ -243,7 +244,8 @@ async def get_status(project_name: str) -> GenerationStatus:
         error=error_msg,
         classified_error=classified_error,
         error_strategy=error_strategy,
-        available_actions=available_actions
+        available_actions=available_actions,
+        logs=state.logs  # 실시간 로그 반환
     )
 
 @app.post("/api/project/{project_name}/draft")
