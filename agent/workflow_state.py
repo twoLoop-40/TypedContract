@@ -45,6 +45,48 @@ class Phase(Enum):
 
 
 # ============================================================================
+# AutoPauseReason (Spec/WorkflowControl.idr의 AutoPauseReason)
+# ============================================================================
+
+class AutoPauseReason(Enum):
+    """자동 일시 중단 이유"""
+    IDENTICAL_ERROR_3X = "IdenticalError3x"           # 동일 에러 3회 반복
+    MAX_RETRIES_EXCEEDED = "MaxRetriesExceeded"        # 최대 재시도 횟수 초과
+    DATA_VALIDATION_NEEDED = "DataValidationNeeded"    # 데이터 검증 필요
+
+    def __str__(self):
+        labels = {
+            AutoPauseReason.IDENTICAL_ERROR_3X: "동일 에러 3회 반복",
+            AutoPauseReason.MAX_RETRIES_EXCEEDED: "최대 재시도 횟수 초과",
+            AutoPauseReason.DATA_VALIDATION_NEEDED: "데이터 검증 필요"
+        }
+        return labels[self]
+
+
+# ============================================================================
+# ResumeOption (Spec/WorkflowControl.idr의 ResumeOption)
+# ============================================================================
+
+class ResumeOption(Enum):
+    """AutoPaused 상태에서 재개 옵션"""
+    RETRY_WITH_NEW_PROMPT = "RetryWithNewPrompt"     # 프롬프트 수정 후 재시도
+    RETRY_WITH_MORE_DOCS = "RetryWithMoreDocs"       # 참조 문서 추가 후 재시도
+    SKIP_VALIDATION = "SkipValidation"               # 검증 스킵하고 문서 생성
+    MANUAL_FIX = "ManualFix"                         # 사용자가 수동 수정 후 재개
+    CANCEL_PROJECT = "CancelProject"                 # 프로젝트 취소
+
+    def __str__(self):
+        labels = {
+            ResumeOption.RETRY_WITH_NEW_PROMPT: "프롬프트 수정 후 재시도",
+            ResumeOption.RETRY_WITH_MORE_DOCS: "참조 문서 추가 후 재시도",
+            ResumeOption.SKIP_VALIDATION: "검증 스킵하고 문서 생성",
+            ResumeOption.MANUAL_FIX: "수동 수정 후 재개",
+            ResumeOption.CANCEL_PROJECT: "프로젝트 취소"
+        }
+        return labels[self]
+
+
+# ============================================================================
 # CompileResult
 # ============================================================================
 
@@ -109,6 +151,11 @@ class WorkflowState:
     error_suggestion: Optional[dict] = None  # 동일 에러 3회 시 사용자 제안
     user_action: Optional[str] = None        # 사용자 선택한 액션
     error_history: List[str] = field(default_factory=list)  # 최근 에러 메시지 추적
+
+    # 중단/재개 관리
+    is_paused: bool = False                  # 동일 에러 3회로 일시 중단됨
+    pause_reason: Optional[str] = None       # 중단 이유
+    resume_options: List[str] = field(default_factory=list)  # 재개 옵션들
 
     # Phase 5: 문서 구현
     documentable_impl: Optional[str] = None

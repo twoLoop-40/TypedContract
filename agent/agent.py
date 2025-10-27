@@ -4,6 +4,7 @@ LangGraph 기반 Idris2 도메인 모델 생성 에이전트
 
 import os
 import subprocess
+import json
 from typing import TypedDict, List, Optional, Literal
 from pathlib import Path
 
@@ -90,6 +91,46 @@ def add_log(state: AgentState, message: str) -> None:
     # 최근 100개만 유지
     if len(state["logs"]) > 100:
         state["logs"] = state["logs"][-100:]
+
+
+def save_state_to_file(state: AgentState) -> None:
+    """
+    현재 상태를 output/{project_name}/workflow_state.json에 저장
+
+    Args:
+        state: AgentState
+
+    Note:
+        동일 에러 3회 반복 시 자동으로 호출되어 상태 보존
+    """
+    project_name = state.get("project_name", "unknown")
+    output_dir = Path(f"./output/{project_name}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    state_file = output_dir / "workflow_state.json"
+
+    # State를 JSON으로 변환 (특수 객체 처리)
+    state_dict = {}
+    for key, value in state.items():
+        if key == "logs":
+            # 로그는 최근 20개만 저장
+            state_dict[key] = value[-20:] if value else []
+        elif isinstance(value, (str, int, bool, float)) or value is None:
+            state_dict[key] = value
+        elif isinstance(value, list):
+            state_dict[key] = value
+        elif isinstance(value, dict):
+            state_dict[key] = value
+        else:
+            # 복잡한 객체는 문자열로 변환
+            state_dict[key] = str(value)
+
+    try:
+        with open(state_file, 'w', encoding='utf-8') as f:
+            json.dump(state_dict, f, indent=2, ensure_ascii=False)
+        print(f"   💾 State saved to {state_file}")
+    except Exception as e:
+        print(f"   ⚠️ Failed to save state: {e}")
 
 
 # ============================================================================
@@ -725,8 +766,8 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
         last_three = error_history[-3:]
         if last_three[0] == last_three[1] == last_three[2]:
             print(f"   ├─ Same error repeated 3 times: {last_three[0][:60]}...")
-            print(f"   └─ Decision: ask_user (identical error, need manual intervention)")
-            add_log(state, f"⛔ 동일 에러 3회 반복 - 사용자 개입 필요: {last_three[0][:50]}...")
+            print(f"   └─ Decision: pause_and_save (identical error, need manual intervention)")
+            add_log(state, f"⛔ 동일 에러 3회 반복 - 워크플로우 일시 중단")
 
             # 사용자에게 유용한 피드백 제공
             state["error_suggestion"] = {
@@ -740,6 +781,21 @@ def should_continue(state: AgentState) -> Literal["finish", "fail", "fix_error",
                 "error_preview": last_three[0][:200],
                 "can_retry": True
             }
+
+            # 상태 보존 정보 설정
+            state["is_paused"] = True
+            state["pause_reason"] = "identical_error_3x"
+            state["resume_options"] = [
+                "retry_with_new_prompt",  # 프롬프트 수정 후 재시도
+                "skip_validation",        # 검증 스킵하고 문서 생성
+                "manual_fix",             # 수동 수정 후 재개
+                "cancel"                  # 프로젝트 취소
+            ]
+
+            # 상태 즉시 저장
+            save_state_to_file(state)
+            add_log(state, f"💾 상태 저장 완료 - 재개 가능")
+
             return "ask_user"  # fail 대신 ask_user로 변경
 
     # 에러 전략에 따라 분기

@@ -14,6 +14,18 @@ import Spec.ProjectRecovery
 -- Workflow Control State (워크플로우 제어 상태)
 -- ============================================================================
 
+||| 자동 일시 중단 이유 (ExecutionState보다 먼저 정의해야 함)
+public export
+data AutoPauseReason : Type where
+  ||| 동일한 에러가 3회 연속 반복됨
+  IdenticalError3x : (errorPreview : String) -> AutoPauseReason
+
+  ||| 최대 재시도 횟수 초과 (5회)
+  MaxRetriesExceeded : (attempts : Nat) -> AutoPauseReason
+
+  ||| 사용자 데이터 검증 필요 (증명 실패 등)
+  DataValidationNeeded : (proofError : String) -> AutoPauseReason
+
 ||| 워크플로우의 실행 상태
 public export
 data ExecutionState : Type where
@@ -28,6 +40,9 @@ data ExecutionState : Type where
 
   ||| 에러로 인해 멈춤 (자동 재시도 실패)
   Stopped : (stoppedAt : Phase) -> (errorMsg : String) -> ExecutionState
+
+  ||| 동일 에러 3회 반복으로 자동 일시 중단 (사용자 개입 필요)
+  AutoPaused : (pausedAt : Phase) -> (reason : AutoPauseReason) -> ExecutionState
 
   ||| 완료됨
   Completed : ExecutionState
@@ -58,6 +73,48 @@ data ControlAction : Type where
   Cancel : (name : String) -> ControlAction
 
 -- ============================================================================
+-- Resume Options (AutoPaused 상태에서 재개 옵션)
+-- ============================================================================
+
+||| AutoPaused 상태에서 사용자가 선택할 수 있는 재개 옵션
+public export
+data ResumeOption : Type where
+  ||| 프롬프트 수정 후 Phase 2부터 재시도
+  RetryWithNewPrompt : (newPrompt : String) -> ResumeOption
+
+  ||| 참조 문서 추가 후 Phase 2부터 재시도
+  RetryWithMoreDocs : (newDocs : List String) -> ResumeOption
+
+  ||| 검증 스킵하고 문서 생성 (증명 제거)
+  SkipValidation : ResumeOption
+
+  ||| 사용자가 Idris2 코드 수동 수정 후 재개
+  ManualFix : (fixedFilePath : String) -> ResumeOption
+
+  ||| 프로젝트 취소
+  CancelProject : ResumeOption
+
+||| AutoPaused 상태에서 사용 가능한 옵션 확인
+public export
+availableResumeOptions : AutoPauseReason -> List ResumeOption
+availableResumeOptions (IdenticalError3x _) =
+  [ RetryWithNewPrompt ""  -- 프롬프트 수정
+  , RetryWithMoreDocs []   -- 참조 문서 추가
+  , ManualFix ""           -- 수동 수정
+  , CancelProject          -- 취소
+  ]
+availableResumeOptions (MaxRetriesExceeded _) =
+  [ RetryWithNewPrompt ""
+  , SkipValidation
+  , CancelProject
+  ]
+availableResumeOptions (DataValidationNeeded _) =
+  [ RetryWithNewPrompt ""
+  , SkipValidation         -- 증명 제거
+  , CancelProject
+  ]
+
+-- ============================================================================
 -- Control Predicates (제어 가능 여부 검증)
 -- ============================================================================
 
@@ -73,18 +130,20 @@ canPause : ExecutionState -> Bool
 canPause (Running _) = True
 canPause _ = False
 
-||| 재개 가능한가? (Paused 또는 Stopped 상태에서)
+||| 재개 가능한가? (Paused, Stopped, AutoPaused 상태에서)
 public export
 canResume : ExecutionState -> Bool
 canResume (Paused _) = True
 canResume (Stopped _ _) = True
+canResume (AutoPaused _ _) = True  -- AutoPaused도 재개 가능
 canResume _ = False
 
-||| 재시작 가능한가? (Stopped, Paused, Completed 상태에서)
+||| 재시작 가능한가? (Stopped, Paused, AutoPaused, Completed 상태에서)
 public export
 canRestart : ExecutionState -> Bool
 canRestart (Paused _) = True
 canRestart (Stopped _ _) = True
+canRestart (AutoPaused _ _) = True  -- AutoPaused도 재시작 가능
 canRestart Completed = True
 canRestart _ = False
 
@@ -119,6 +178,17 @@ data ControlTransition : ExecutionState -> ControlAction -> ExecutionState -> Ty
                        -> (errorMsg : String)
                        -> ControlTransition (Stopped phase errorMsg) (Resume name) (Running phase)
 
+  ||| 재개 (AutoPaused 후): AutoPaused → Running (ResumeOption 적용)
+  TransResumeAfterAutoPause : (phase : Phase)
+                           -> (reason : AutoPauseReason)
+                           -> (option : ResumeOption)
+                           -> ControlTransition (AutoPaused phase reason) (Resume name) (Running phase)
+
+  ||| 자동 일시 중단: Running → AutoPaused (동일 에러 3회)
+  TransAutoPause : (phase : Phase)
+                -> (reason : AutoPauseReason)
+                -> ControlTransition (Running phase) (Pause name) (AutoPaused phase reason)
+
   ||| 재시작 (프롬프트 수정): Any → Running AnalysisPhase
   TransRestartWithPrompt : (oldState : ExecutionState)
                         -> (newPrompt : String)
@@ -128,7 +198,7 @@ data ControlTransition : ExecutionState -> ControlAction -> ExecutionState -> Ty
   TransRestartFromBeginning : (oldState : ExecutionState)
                            -> ControlTransition oldState (RestartFromBeginning name) (Running InputPhase)
 
-  ||| 취소: Running/Paused → NotStarted
+  ||| 취소: Running/Paused/AutoPaused → NotStarted
   TransCancel : (state : ExecutionState)
              -> ControlTransition state (Cancel name) NotStarted
 
@@ -145,16 +215,18 @@ data ControlSafety : ExecutionState -> ControlAction -> Type where
   ||| Pause는 Running에서만 안전
   SafePause : (phase : Phase) -> ControlSafety (Running phase) (Pause name)
 
-  ||| Resume은 Paused/Stopped에서만 안전
+  ||| Resume은 Paused/Stopped/AutoPaused에서만 안전
   SafeResumePaused : (phase : Phase) -> ControlSafety (Paused phase) (Resume name)
   SafeResumeStopped : (phase : Phase) -> (err : String) -> ControlSafety (Stopped phase err) (Resume name)
+  SafeResumeAutoPaused : (phase : Phase) -> (reason : AutoPauseReason) -> ControlSafety (AutoPaused phase reason) (Resume name)
 
   ||| Restart는 거의 모든 상태에서 안전
   SafeRestart : (oldState : ExecutionState) -> ControlSafety oldState (RestartWithPrompt name prompt)
 
-  ||| Cancel은 Running/Paused에서만 안전
+  ||| Cancel은 Running/Paused/AutoPaused에서만 안전
   SafeCancelRunning : (phase : Phase) -> ControlSafety (Running phase) (Cancel name)
   SafeCancelPaused : (phase : Phase) -> ControlSafety (Paused phase) (Cancel name)
+  SafeCancelAutoPaused : (phase : Phase) -> (reason : AutoPauseReason) -> ControlSafety (AutoPaused phase reason) (Cancel name)
 
 -- ============================================================================
 -- UI State Mapping (UI 상태 매핑)
@@ -190,8 +262,38 @@ data AvailableButtons : ExecutionState -> Type where
   ||| Stopped: "재개", "프롬프트 수정", "처음부터" 버튼
   ShowRecoveryOptions : (phase : Phase) -> (err : String) -> AvailableButtons (Stopped phase err)
 
+  ||| AutoPaused: 중단 이유에 따라 다른 재개 옵션 표시
+  ShowAutoPauseOptions : (phase : Phase) -> (reason : AutoPauseReason) -> AvailableButtons (AutoPaused phase reason)
+
   ||| Completed: "다시 생성" 버튼
   ShowRegenerate : AvailableButtons Completed
+
+||| AutoPaused 상태에서 사용자에게 보여줄 UI 메시지
+public export
+autoPauseMessage : AutoPauseReason -> String
+autoPauseMessage (IdenticalError3x preview) =
+  "동일한 에러가 3회 반복되어 자동으로 중단되었습니다.\n\n" ++
+  "에러 내용: " ++ preview ++ "\n\n" ++
+  "다음 중 하나를 선택해주세요:\n" ++
+  "1. 프롬프트를 더 구체적으로 수정\n" ++
+  "2. 참조 문서 추가\n" ++
+  "3. Idris2 파일 수동 수정\n" ++
+  "4. 프로젝트 취소"
+
+autoPauseMessage (MaxRetriesExceeded n) =
+  "최대 재시도 횟수(" ++ show n ++ "회)를 초과했습니다.\n\n" ++
+  "다음 중 하나를 선택해주세요:\n" ++
+  "1. 프롬프트 수정 후 재시도\n" ++
+  "2. 검증 스킵하고 문서 생성\n" ++
+  "3. 프로젝트 취소"
+
+autoPauseMessage (DataValidationNeeded proofErr) =
+  "데이터 검증이 필요합니다.\n\n" ++
+  "증명 실패: " ++ proofErr ++ "\n\n" ++
+  "다음 중 하나를 선택해주세요:\n" ++
+  "1. 입력 데이터 확인 후 프롬프트 수정\n" ++
+  "2. 검증 스킵하고 문서 생성 (증명 제거)\n" ++
+  "3. 프로젝트 취소"
 
 -- ============================================================================
 -- Backend Background Task (백엔드 백그라운드 작업)
