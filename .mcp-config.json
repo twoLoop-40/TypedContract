@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "typedcontract-filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/joonho/Idris2Projects/TypedContract/output",
+        "/Users/joonho/Idris2Projects/TypedContract/Domains",
+        "/Users/joonho/Idris2Projects/TypedContract/Pipeline",
+        "/Users/joonho/Idris2Projects/TypedContract/Spec"
+      ],
+      "description": "TypedContract file system access for output, domains, pipelines, and specifications"
+    }
+  }
+}

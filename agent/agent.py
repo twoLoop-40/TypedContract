@@ -242,9 +242,13 @@ def save_idris_file(code: str, file_path: str) -> str:
         return f"❌ Error saving file: {e}"
 
 
-def read_reference_doc(file_path: str) -> str:
+def read_reference_doc(file_name: str, project_name: str) -> str:
     """
     참고 문서 읽기 (PDF, 이미지, 텍스트 지원)
+
+    Args:
+        file_name: 파일명 (예: "수정사업계획서 주식회사 스피라티.pdf")
+        project_name: 프로젝트명 (예: "test_error_fix")
 
     Supports:
     - PDF files (.pdf) - PyPDF2로 텍스트 추출
@@ -253,7 +257,9 @@ def read_reference_doc(file_path: str) -> str:
     """
     from pathlib import Path
 
-    path = Path(file_path)
+    # 전체 경로 구성: output/{project_name}/references/{file_name}
+    file_path = Path(f"./output/{project_name}/references/{file_name}")
+    path = file_path
 
     if not path.exists():
         return f"Error: File not found: {file_path}"
@@ -310,9 +316,9 @@ def analyze_document(state: AgentState) -> AgentState:
     print("\n📄 [1/5] Analyzing document...")
     add_log(state, "📄 문서 분석 시작...")
 
-    # 참고 문서 읽기
+    # 참고 문서 읽기 (project_name과 함께 경로 구성)
     docs_content = "\n\n".join([
-        f"[{doc}]\n{read_reference_doc(doc)}"
+        f"[{doc}]\n{read_reference_doc(doc, state['project_name'])}"
         for doc in state["reference_docs"]
     ])
 

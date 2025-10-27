@@ -109,6 +109,7 @@ def is_syntax_error(message: str) -> bool:
         "Module name",  # Module name mismatch
         "does not match file name",
         "Couldn't parse",
+        "Expected",  # Expected a type declaration, Expected expression, etc.
     ]
     return any(pattern in message for pattern in patterns)
 

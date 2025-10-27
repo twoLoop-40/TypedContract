@@ -185,14 +185,26 @@ async def generate_spec(project_name: str, background_tasks: BackgroundTasks):
     def run_generation():
         try:
             # Phase 2-5: LangGraph agent 실행
+            print(f"\n🚀 Starting workflow for {project_name}...")
             updated_state = run_workflow(state)
 
             # 상태 저장
+            print(f"\n💾 Saving workflow state...")
             updated_state.save(Path("./output"))
+            print(f"\n✅ Workflow completed successfully!")
 
         except Exception as e:
-            # 에러 발생 시 상태에 기록
-            state.compile_result = CompileResult(success=False, error_msg=str(e))
+            # 에러 발생 시 상태에 기록 및 로그 출력
+            import traceback
+            error_msg = f"Workflow error: {str(e)}"
+            print(f"\n❌ ERROR in background workflow:")
+            print(f"   Project: {project_name}")
+            print(f"   Error: {error_msg}")
+            print(f"   Traceback:")
+            traceback.print_exc()
+
+            state.compile_result = CompileResult(success=False, error_msg=error_msg)
+            state.add_log(f"❌ 워크플로우 에러: {str(e)}")
             state.save(Path("./output"))
 
     background_tasks.add_task(run_generation)
